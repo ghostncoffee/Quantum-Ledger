@@ -3,6 +3,11 @@
   "productName": "Game Ledger",
   "version": "0.1.0",
   "description": "Local game economy tracker for Star Citizen, EVE Online, and more",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Axiomancer/SC-Inventory-App"
+  },
+  "author": "Axiomancer",
   "main": "main.js",
   "private": true,
   "scripts": {

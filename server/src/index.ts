@@ -14,6 +14,7 @@ import salesRouter from './routes/sales';
 import craftingRouter from './routes/crafting';
 import contractsRouter from './routes/contracts';
 import haulingRouter from './routes/hauling';
+import locationsRouter from './routes/locations';
 import expensesRouter from './routes/expenses';
 import inventoryRouter from './routes/inventory';
 import accountingRouter from './routes/accounting';
@@ -35,6 +36,7 @@ export async function startServer(port?: number, clientDist?: string): Promise<v
   app.use('/api/crafting', craftingRouter);
   app.use('/api/contracts', contractsRouter);
   app.use('/api/hauling', haulingRouter);
+  app.use('/api/locations', locationsRouter);
   app.use('/api/expenses', expensesRouter);
   app.use('/api/inventory', inventoryRouter);
   app.use('/api/accounting', accountingRouter);

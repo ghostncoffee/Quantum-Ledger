@@ -122,6 +122,11 @@ export const inventoryApi = {
   remove: (id: number) => del(`/inventory/${id}`),
 };
 
+// Locations
+export const locationsApi = {
+  list: (params?: Record<string, unknown>) => get('/locations', params),
+};
+
 // Accounting / Ledger
 export const accountingApi = {
   list: (params?: Record<string, unknown>) => get('/accounting', params),

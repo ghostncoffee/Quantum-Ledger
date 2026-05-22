@@ -12,6 +12,7 @@ import { Accounting } from './pages/Accounting';
 import { Inventory } from './pages/Inventory';
 import { Crew } from './pages/Crew';
 import { Vehicles } from './pages/Vehicles';
+import { Locations } from './pages/Locations';
 import { Settings } from './pages/Settings';
 
 const queryClient = new QueryClient({
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="contracts" element={<Contracts />} />
             <Route path="accounting" element={<Accounting />} />
             <Route path="inventory" element={<Inventory />} />
+            <Route path="locations" element={<Locations />} />
             <Route path="crew" element={<Crew />} />
             <Route path="vehicles" element={<Vehicles />} />
             <Route path="settings" element={<Settings />} />

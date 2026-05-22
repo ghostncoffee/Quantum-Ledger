@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Pickaxe, TrendingUp, Wrench, FileText,
-  Package, Users, Car, BookOpen, ChevronRight, Gamepad2
+  Package, MapPin, Users, Car, BookOpen, ChevronRight, Gamepad2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ const nav = [
   { label: '─', divider: true },
   { to: '/accounting', icon: BookOpen, label: 'Accounting' },
   { to: '/inventory', icon: Package, label: 'Inventory' },
+  { to: '/locations', icon: MapPin, label: 'Locations' },
   { label: '─', divider: true },
   { to: '/crew', icon: Users, label: 'Crew' },
   { to: '/vehicles', icon: Car, label: 'Vehicles' },

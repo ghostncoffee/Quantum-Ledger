@@ -73,7 +73,10 @@ router.get('/runs', async (req, res) => {
         r.id, r.title, r.type, r.status, r.started_at, r.ended_at,
         g.name as game_name, g.currency,
         v.name as vehicle_name,
-        COALESCE((SELECT SUM(total_revenue) FROM sales WHERE run_id = r.id), 0) as revenue,
+        COALESCE((SELECT SUM(total_revenue) FROM sales WHERE run_id = r.id), 0)
+          + COALESCE((SELECT SUM(hj.agreed_payout + COALESCE(hj.bonus_payout, 0))
+                      FROM hauling_jobs hj WHERE hj.run_id = r.id AND hj.status = 'delivered'), 0)
+          as revenue,
         COALESCE((SELECT SUM(amount) FROM expenses WHERE run_id = r.id), 0) as expenses,
         COALESCE((SELECT SUM(amount) FROM ledger_entries WHERE run_id = r.id AND type = 'crew_payout'), 0) as crew_payouts,
         CASE WHEN r.started_at IS NOT NULL AND r.ended_at IS NOT NULL

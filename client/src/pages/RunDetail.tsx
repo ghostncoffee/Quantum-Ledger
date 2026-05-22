@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   runsApi, miningApi, tradingApi, salesApi, craftingApi,
-  contractsApi, expensesApi, crewApi,
+  contractsApi, haulingApi, expensesApi, crewApi,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -327,6 +327,148 @@ function TradingPanel({ runId, currency }: { runId: number; currency: string }) 
   );
 }
 
+// ─── Sub-panel: Hauling ───────────────────────────────────────────────────────
+function HaulingPanel({ runId, currency }: { runId: number; currency: string }) {
+  const qc = useQueryClient();
+  const { data: jobs = [] } = useQuery({
+    queryKey: ['hauling', runId],
+    queryFn: () => haulingApi.getForRun(runId),
+  });
+
+  const [form, setForm] = useState({
+    cargoType: '', scuAmount: '', pickupLocation: '',
+    deliveryLocation: '', agreedPayout: '', bonusPayout: '', notes: '',
+  });
+
+  const add = useMutation({
+    mutationFn: (d: unknown) => haulingApi.create(d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hauling', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => haulingApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hauling', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+    },
+  });
+  const advance = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      haulingApi.update(id, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hauling', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+    },
+  });
+
+  const deliveredTotal = (jobs as any[])
+    .filter((j: any) => j.status === 'delivered')
+    .reduce((s: number, j: any) => s + j.agreed_payout + (j.bonus_payout || 0), 0);
+  const pendingTotal = (jobs as any[])
+    .filter((j: any) => j.status !== 'delivered')
+    .reduce((s: number, j: any) => s + j.agreed_payout, 0);
+
+  const NEXT_STATUS: Record<string, string> = { pending: 'in_transit', in_transit: 'delivered' };
+  const NEXT_LABEL: Record<string, string> = { pending: 'Mark Picked Up', in_transit: 'Mark Delivered' };
+
+  return (
+    <div className="space-y-4">
+      {(jobs as any[]).length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Contracts" value={String((jobs as any[]).length)} />
+          <StatCard label="Earned" value={fmtCurrency(deliveredTotal, currency)} trend="up" />
+          <StatCard label="Pending" value={fmtCurrency(pendingTotal, currency)} />
+        </div>
+      )}
+
+      <Card>
+        <CardHeader><CardTitle>Add Hauling Contract</CardTitle></CardHeader>
+        <div className="grid grid-cols-3 gap-2">
+          <input placeholder="Cargo type (e.g. Medical Supplies)" value={form.cargoType} onChange={e => setForm(f => ({ ...f, cargoType: e.target.value }))} />
+          <input type="number" placeholder="SCU amount" value={form.scuAmount} onChange={e => setForm(f => ({ ...f, scuAmount: e.target.value }))} />
+          <input type="number" placeholder="Agreed payout" value={form.agreedPayout} onChange={e => setForm(f => ({ ...f, agreedPayout: e.target.value }))} />
+          <input placeholder="Pickup location" value={form.pickupLocation} onChange={e => setForm(f => ({ ...f, pickupLocation: e.target.value }))} />
+          <input placeholder="Delivery location" value={form.deliveryLocation} onChange={e => setForm(f => ({ ...f, deliveryLocation: e.target.value }))} />
+          <input type="number" placeholder="Bonus (optional)" value={form.bonusPayout} onChange={e => setForm(f => ({ ...f, bonusPayout: e.target.value }))} />
+          <input placeholder="Notes (optional)" className="col-span-3" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+        </div>
+        <Button className="mt-2" size="sm" onClick={() => {
+          if (!form.agreedPayout) return;
+          add.mutate({
+            runId,
+            cargoType: form.cargoType || undefined,
+            scuAmount: form.scuAmount ? Number(form.scuAmount) : undefined,
+            pickupLocation: form.pickupLocation || undefined,
+            deliveryLocation: form.deliveryLocation || undefined,
+            agreedPayout: Number(form.agreedPayout),
+            bonusPayout: Number(form.bonusPayout) || 0,
+            notes: form.notes || undefined,
+          });
+          setForm({ cargoType: '', scuAmount: '', pickupLocation: '', deliveryLocation: '', agreedPayout: '', bonusPayout: '', notes: '' });
+        }}><Plus size={13} /> Add Contract</Button>
+      </Card>
+
+      {(jobs as any[]).length > 0 && (
+        <div className="space-y-3">
+          {(jobs as any[]).map((j: any) => (
+            <Card key={j.id}>
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <span className="font-semibold text-slate-200">{j.cargo_type || 'Unnamed cargo'}</span>
+                  {j.scu_amount != null && (
+                    <span className="ml-2 text-sm text-slate-400">{j.scu_amount} SCU</span>
+                  )}
+                  {(j.pickup_location || j.delivery_location) && (
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {j.pickup_location || '?'} → {j.delivery_location || '?'}
+                    </p>
+                  )}
+                  {j.notes && <p className="text-xs text-slate-500 italic mt-0.5">{j.notes}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge label={j.status} />
+                  <Button variant="danger" size="sm" onClick={() => remove.mutate(j.id)}>
+                    <Trash2 size={12} />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-slate-500">Payout</p>
+                  <p className="text-emerald-400 font-semibold">{fmtCurrency(j.agreed_payout, currency)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Bonus</p>
+                  <p className="text-amber-400">{j.bonus_payout ? fmtCurrency(j.bonus_payout, currency) : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Total</p>
+                  <p className="text-emerald-400">{fmtCurrency(j.agreed_payout + (j.bonus_payout || 0), currency)}</p>
+                </div>
+              </div>
+
+              {j.status !== 'delivered' && NEXT_STATUS[j.status] && (
+                <div className="mt-2 pt-2 border-t border-[#1e2d4f]">
+                  <Button
+                    size="sm"
+                    variant={j.status === 'in_transit' ? 'primary' : 'secondary'}
+                    onClick={() => advance.mutate({ id: j.id, status: NEXT_STATUS[j.status] })}
+                  >
+                    <CheckCircle size={12} /> {NEXT_LABEL[j.status]}
+                  </Button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Sub-panel: Crafting ──────────────────────────────────────────────────────
 function CraftingPanel({ runId, currency }: { runId: number; currency: string }) {
   const qc = useQueryClient();
@@ -581,11 +723,15 @@ function CrewPanel({ runId, currency, profit }: { runId: number; currency: strin
 function ContractsPanel({ runId, currency }: { runId: number; currency: string }) {
   const qc = useQueryClient();
   const { data: contracts = [] } = useQuery({ queryKey: ['contracts', runId], queryFn: () => contractsApi.getForRun(runId) });
-  const [form, setForm] = useState({ type: 'combat', clientName: '', description: '', agreedPayout: '', bonusPayout: '' });
+  const [form, setForm] = useState({
+    type: 'combat', clientName: '', description: '', agreedPayout: '', bonusPayout: '',
+    // Hauling-specific
+    cargoType: '', scuAmount: '', pickupLocation: '', deliveryLocation: '',
+  });
 
   const add = useMutation({
     mutationFn: (d: unknown) => contractsApi.create(d),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['contracts', runId] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
   });
   const complete = useMutation({
     mutationFn: (id: number) => contractsApi.complete(id),
@@ -595,6 +741,8 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
     mutationFn: (id: number) => contractsApi.remove(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
   });
+
+  const isHauling = form.type === 'hauling';
 
   return (
     <div className="space-y-4">
@@ -608,11 +756,39 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
           <input placeholder="Description" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           <input type="number" placeholder="Agreed payout" value={form.agreedPayout} onChange={e => setForm(f => ({ ...f, agreedPayout: e.target.value }))} />
           <input type="number" placeholder="Bonus (optional)" value={form.bonusPayout} onChange={e => setForm(f => ({ ...f, bonusPayout: e.target.value }))} />
+
+          {/* Hauling-specific fields — only shown when type = hauling */}
+          {isHauling && (
+            <>
+              <div className="col-span-3 border-t border-[#1e2d4f] pt-2">
+                <p className="text-xs text-slate-500 mb-2">Hauling details</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <input placeholder="Cargo type (e.g. Medical Supplies)" value={form.cargoType} onChange={e => setForm(f => ({ ...f, cargoType: e.target.value }))} />
+                  <input type="number" placeholder="SCU amount" value={form.scuAmount} onChange={e => setForm(f => ({ ...f, scuAmount: e.target.value }))} />
+                  <div />
+                  <input placeholder="Pickup location" value={form.pickupLocation} onChange={e => setForm(f => ({ ...f, pickupLocation: e.target.value }))} />
+                  <input placeholder="Delivery location" value={form.deliveryLocation} onChange={e => setForm(f => ({ ...f, deliveryLocation: e.target.value }))} />
+                </div>
+              </div>
+            </>
+          )}
         </div>
         <Button className="mt-2" size="sm" onClick={() => {
           if (!form.agreedPayout) return;
-          add.mutate({ runId, type: form.type, clientName: form.clientName || undefined, description: form.description || undefined, agreedPayout: Number(form.agreedPayout), bonusPayout: Number(form.bonusPayout) || 0 });
-          setForm({ type: 'combat', clientName: '', description: '', agreedPayout: '', bonusPayout: '' });
+          add.mutate({
+            runId, type: form.type,
+            clientName: form.clientName || undefined,
+            description: form.description || undefined,
+            agreedPayout: Number(form.agreedPayout),
+            bonusPayout: Number(form.bonusPayout) || 0,
+            ...(isHauling && {
+              cargoType: form.cargoType || undefined,
+              scuAmount: form.scuAmount ? Number(form.scuAmount) : undefined,
+              pickupLocation: form.pickupLocation || undefined,
+              deliveryLocation: form.deliveryLocation || undefined,
+            }),
+          });
+          setForm({ type: 'combat', clientName: '', description: '', agreedPayout: '', bonusPayout: '', cargoType: '', scuAmount: '', pickupLocation: '', deliveryLocation: '' });
         }}><Plus size={13} /> Add</Button>
       </Card>
 
@@ -622,7 +798,15 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
           <tbody>
             {(contracts as any[]).map((c: any) => (
               <Tr key={c.id}>
-                <Td><Badge label={c.type} /></Td>
+                <Td>
+                  <Badge label={c.type} />
+                  {c.type === 'hauling' && (c.cargo_type || c.scu_amount) && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      {c.cargo_type}{c.scu_amount != null ? ` · ${c.scu_amount} SCU` : ''}
+                      {c.pickup_location && ` · ${c.pickup_location} → ${c.delivery_location || '?'}`}
+                    </p>
+                  )}
+                </Td>
                 <Td className="text-slate-300">{c.client_name || '—'}</Td>
                 <Td className="text-emerald-400">{fmtCurrency(c.agreed_payout, currency)}</Td>
                 <Td className="text-amber-400">{c.bonus_payout ? fmtCurrency(c.bonus_payout, currency) : '—'}</Td>
@@ -680,7 +864,7 @@ function DeleteRunModal({ runId, runTitle, open, onClose }: { runId: number; run
 }
 
 // ─── Main RunDetail page ──────────────────────────────────────────────────────
-const TABS = ['overview', 'mining', 'trading', 'crafting', 'contracts', 'expenses', 'crew'] as const;
+const TABS = ['overview', 'mining', 'trading', 'hauling', 'crafting', 'contracts', 'expenses', 'crew'] as const;
 type Tab = typeof TABS[number];
 
 export function RunDetail() {
@@ -814,6 +998,7 @@ export function RunDetail() {
         )}
         {tab === 'mining' && <MiningPanel runId={runId} currency={currency} />}
         {tab === 'trading' && <TradingPanel runId={runId} currency={currency} />}
+        {tab === 'hauling' && <HaulingPanel runId={runId} currency={currency} />}
         {tab === 'crafting' && <CraftingPanel runId={runId} currency={currency} />}
         {tab === 'contracts' && <ContractsPanel runId={runId} currency={currency} />}
         {tab === 'expenses' && <ExpensesPanel runId={runId} currency={currency} />}

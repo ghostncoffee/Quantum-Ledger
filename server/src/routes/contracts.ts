@@ -29,33 +29,46 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { runId, type, clientName, description, agreedPayout, bonusPayout } = req.body;
+  const { runId, type, clientName, description, agreedPayout, bonusPayout,
+          cargoType, scuAmount, pickupLocation, deliveryLocation } = req.body;
   if (!runId || !type || agreedPayout == null) {
     return res.status(400).json({ error: 'runId, type, agreedPayout required' });
   }
   try {
     const result = await db.run(
-      'INSERT INTO contracts (run_id, type, client_name, description, agreed_payout, bonus_payout) VALUES (?, ?, ?, ?, ?, ?)',
-      [runId, type, clientName ?? null, description ?? null, agreedPayout, bonusPayout ?? 0]
+      `INSERT INTO contracts
+         (run_id, type, client_name, description, agreed_payout, bonus_payout,
+          cargo_type, scu_amount, pickup_location, delivery_location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [runId, type, clientName ?? null, description ?? null, agreedPayout, bonusPayout ?? 0,
+       cargoType ?? null, scuAmount ?? null, pickupLocation ?? null, deliveryLocation ?? null]
     );
     res.status(201).json({ id: result.lastInsertRowid });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.put('/:id', async (req, res) => {
-  const { type, clientName, description, agreedPayout, bonusPayout, status, completedAt } = req.body;
+  const { type, clientName, description, agreedPayout, bonusPayout, status, completedAt,
+          cargoType, scuAmount, pickupLocation, deliveryLocation } = req.body;
   try {
     await db.run(`
       UPDATE contracts SET
-        type = COALESCE(?, type),
-        client_name = COALESCE(?, client_name),
-        description = COALESCE(?, description),
-        agreed_payout = COALESCE(?, agreed_payout),
-        bonus_payout = COALESCE(?, bonus_payout),
-        status = COALESCE(?, status),
-        completed_at = COALESCE(?, completed_at)
+        type              = COALESCE(?, type),
+        client_name       = COALESCE(?, client_name),
+        description       = COALESCE(?, description),
+        agreed_payout     = COALESCE(?, agreed_payout),
+        bonus_payout      = COALESCE(?, bonus_payout),
+        status            = COALESCE(?, status),
+        completed_at      = COALESCE(?, completed_at),
+        cargo_type        = COALESCE(?, cargo_type),
+        scu_amount        = COALESCE(?, scu_amount),
+        pickup_location   = COALESCE(?, pickup_location),
+        delivery_location = COALESCE(?, delivery_location)
       WHERE id = ?
-    `, [type ?? null, clientName ?? null, description ?? null, agreedPayout ?? null, bonusPayout ?? null, status ?? null, completedAt ?? null, req.params.id]);
+    `, [type ?? null, clientName ?? null, description ?? null, agreedPayout ?? null,
+        bonusPayout ?? null, status ?? null, completedAt ?? null,
+        cargoType ?? null, scuAmount ?? null, pickupLocation ?? null, deliveryLocation ?? null,
+        req.params.id]);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

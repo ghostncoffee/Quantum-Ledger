@@ -13,7 +13,10 @@ router.get('/', async (req, res) => {
         g.currency,
         v.name as vehicle_name,
         v.type as vehicle_type,
-        (SELECT COALESCE(SUM(total_revenue), 0) FROM sales WHERE run_id = r.id) as total_revenue,
+        (SELECT COALESCE(SUM(total_revenue), 0) FROM sales WHERE run_id = r.id)
+          + COALESCE((SELECT SUM(hj.agreed_payout + COALESCE(hj.bonus_payout, 0))
+                      FROM hauling_jobs hj WHERE hj.run_id = r.id AND hj.status = 'delivered'), 0)
+          as total_revenue,
         (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE run_id = r.id) as total_expenses,
         (SELECT COUNT(*) FROM run_crew WHERE run_id = r.id) as crew_count,
         CASE
@@ -55,8 +58,13 @@ router.get('/:id', async (req, res) => {
 
     const expenses = await db.all('SELECT * FROM expenses WHERE run_id = ? ORDER BY date', [req.params.id]);
     const sales = await db.all('SELECT * FROM sales WHERE run_id = ? ORDER BY sold_at', [req.params.id]);
+    const haulingJobs = await db.all('SELECT * FROM hauling_jobs WHERE run_id = ? ORDER BY id', [req.params.id]);
 
-    const revenue = (sales as any[]).reduce((s: number, r: any) => s + r.total_revenue, 0);
+    const salesRevenue = (sales as any[]).reduce((s: number, r: any) => s + r.total_revenue, 0);
+    const haulingRevenue = (haulingJobs as any[])
+      .filter((j: any) => j.status === 'delivered')
+      .reduce((s: number, j: any) => s + j.agreed_payout + (j.bonus_payout || 0), 0);
+    const revenue = salesRevenue + haulingRevenue;
     const costs = (expenses as any[]).reduce((s: number, e: any) => s + e.amount, 0);
     const profit = revenue - costs;
 
@@ -66,7 +74,7 @@ router.get('/:id', async (req, res) => {
       durationHours = Math.round((ms / 3600000) * 100) / 100;
     }
 
-    res.json({ ...run, crew, expenses, sales, revenue, costs, profit, durationHours });
+    res.json({ ...run, crew, expenses, sales, haulingJobs, revenue, costs, profit, durationHours });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

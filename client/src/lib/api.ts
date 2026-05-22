@@ -85,6 +85,14 @@ export const craftingApi = {
   removeInput: (id: number) => del(`/crafting/inputs/${id}`),
 };
 
+// Hauling
+export const haulingApi = {
+  getForRun: (runId: number) => get(`/hauling/run/${runId}`),
+  create: (d: unknown) => post('/hauling', d),
+  update: (id: number, d: unknown) => put(`/hauling/${id}`, d),
+  remove: (id: number) => del(`/hauling/${id}`),
+};
+
 // Contracts
 export const contractsApi = {
   list: (params?: Record<string, unknown>) => get('/contracts', params),

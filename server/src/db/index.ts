@@ -182,6 +182,20 @@ CREATE TABLE IF NOT EXISTS contracts (
   completed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS hauling_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  cargo_type TEXT,
+  scu_amount REAL,
+  pickup_location TEXT,
+  delivery_location TEXT,
+  agreed_payout REAL NOT NULL,
+  bonus_payout REAL DEFAULT 0,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  completed_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   game_id INTEGER NOT NULL REFERENCES games(id),
@@ -218,6 +232,17 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 
 export async function initDb() {
   await db.exec(CREATE_TABLES);
+
+  // Schema migrations — safe to run multiple times (silently ignored if column already exists)
+  const migrations = [
+    'ALTER TABLE contracts ADD COLUMN cargo_type TEXT',
+    'ALTER TABLE contracts ADD COLUMN scu_amount REAL',
+    'ALTER TABLE contracts ADD COLUMN pickup_location TEXT',
+    'ALTER TABLE contracts ADD COLUMN delivery_location TEXT',
+  ];
+  for (const sql of migrations) {
+    try { await db.run(sql); } catch { /* column already exists */ }
+  }
 
   // Seed default games if empty
   const count = await db.get('SELECT COUNT(*) as c FROM games');

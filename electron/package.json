@@ -7,13 +7,16 @@
     "type": "git",
     "url": "https://github.com/Axiomancer/star-citizen-ledger"
   },
-  "author": "Axiomancer",
+  "author": {
+    "name": "Axiomancer",
+    "email": "axiomancer@users.noreply.github.com"
+  },
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder",
-    "dist:dir": "electron-builder --dir"
+    "dist": "electron-builder --publish never",
+    "dist:dir": "electron-builder --dir --publish never"
   },
   "dependencies": {
     "@libsql/client": "0.14.0",

@@ -18,6 +18,7 @@ import locationsRouter from './routes/locations';
 import expensesRouter from './routes/expenses';
 import inventoryRouter from './routes/inventory';
 import accountingRouter from './routes/accounting';
+import salvageRouter from './routes/salvage';
 
 export async function startServer(port?: number, clientDist?: string): Promise<void> {
   const app = express();
@@ -40,6 +41,7 @@ export async function startServer(port?: number, clientDist?: string): Promise<v
   app.use('/api/expenses', expensesRouter);
   app.use('/api/inventory', inventoryRouter);
   app.use('/api/accounting', accountingRouter);
+  app.use('/api/salvage', salvageRouter);
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

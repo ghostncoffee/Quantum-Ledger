@@ -199,7 +199,173 @@ router.delete('/entries/:id', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── Refining jobs ────────────────────────────────────────────────────────────
+// ─── Refinery sessions (grouped jobs: one timer + cost, N material lines) ────
+
+router.get('/refining/sessions', async (req, res) => {
+  try {
+    const sessions = await db.all(
+      `SELECT rs.* FROM refinery_sessions rs ORDER BY rs.id DESC`
+    );
+    if ((sessions as any[]).length === 0) return res.json([]);
+
+    const ids = (sessions as any[]).map((s: any) => s.id);
+    const ph  = ids.map(() => '?').join(',');
+    const lines = await db.all(`
+      SELECT rj.*,
+        (SELECT COALESCE(SUM(s.total_revenue),0) FROM sales s WHERE s.refining_job_id = rj.id) as sale_revenue
+      FROM refining_jobs rj
+      WHERE rj.session_id IN (${ph})
+      ORDER BY rj.id
+    `, ids);
+
+    const bySession: Record<number, any[]> = {};
+    for (const l of lines as any[]) {
+      (bySession[l.session_id] = bySession[l.session_id] || []).push(l);
+    }
+
+    res.json((sessions as any[]).map((s: any) => ({
+      ...s,
+      lines: bySession[s.id] || [],
+      sale_revenue: (bySession[s.id] || []).reduce((sum: number, l: any) => sum + (l.sale_revenue || 0), 0),
+    })));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/refining/sessions', async (req, res) => {
+  const { station, method, totalCost, durationMinutes, lines, gameId } = req.body;
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({ error: 'At least one material line required' });
+  }
+  try {
+    const startedAt = durationMinutes ? new Date().toISOString() : null;
+    const sr = await db.run(
+      `INSERT INTO refinery_sessions (station, method, total_cost, duration_minutes, started_at, status, game_id)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      [station ?? null, method ?? null, totalCost ?? 0, durationMinutes ?? null, startedAt, gameId ?? null]
+    );
+    const sessionId = sr.lastInsertRowid;
+    for (const line of lines) {
+      await db.run(
+        `INSERT INTO refining_jobs
+          (session_id, bag_id, refinery_name, refinery_method, input_quantity,
+           output_material, output_quantity, cost_to_refine, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending')`,
+        [sessionId, line.bagId ?? null, station ?? null, method ?? null,
+         line.inputQuantity, line.outputMaterial,
+         line.expectedOutputQty ?? null]
+      );
+    }
+
+    // Remove consumed ore lines from mining bags
+    const allOreLineIds: number[] = lines.flatMap((l: any) =>
+      Array.isArray(l.oreLineIds) ? l.oreLineIds : []
+    );
+    if (allOreLineIds.length > 0) {
+      const ph = allOreLineIds.map(() => '?').join(',');
+      // Grab affected bag IDs before deletion
+      const affectedBags = await db.all(
+        `SELECT DISTINCT bag_id FROM mining_ore_lines WHERE id IN (${ph})`,
+        allOreLineIds
+      );
+      await db.run(`DELETE FROM mining_ore_lines WHERE id IN (${ph})`, allOreLineIds);
+      // Uncommit any bag that now has no non-inert ore remaining
+      for (const { bag_id } of affectedBags as any[]) {
+        const rem = await db.get(
+          'SELECT COUNT(*) as c FROM mining_ore_lines WHERE bag_id = ? AND is_inert = 0',
+          [bag_id]
+        );
+        if ((rem?.c ?? 0) === 0) {
+          await db.run(
+            'UPDATE mining_bags SET committed = 0, committed_location = NULL, committed_at = NULL WHERE id = ?',
+            [bag_id]
+          );
+        }
+      }
+    }
+
+    res.status(201).json({ id: sessionId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/refining/sessions/:id', async (req, res) => {
+  const { station, method, totalCost, durationMinutes, status, startedAt, notes } = req.body;
+  try {
+    await db.run(`
+      UPDATE refinery_sessions SET
+        station          = COALESCE(?, station),
+        method           = COALESCE(?, method),
+        total_cost       = COALESCE(?, total_cost),
+        duration_minutes = COALESCE(?, duration_minutes),
+        started_at       = COALESCE(?, started_at),
+        status           = COALESCE(?, status),
+        notes            = COALESCE(?, notes)
+      WHERE id = ?
+    `, [station ?? null, method ?? null, totalCost ?? null,
+        durationMinutes ?? null, startedAt ?? null, status ?? null, notes ?? null,
+        req.params.id]);
+
+    // When a session is marked done, stock the refined outputs into inventory.
+    // The updateLine calls have already saved output_quantity on each job, so we
+    // just read them back here and call inventoryIn for each.
+    if (status === 'done') {
+      // Use the game_id stored directly on the session (set at creation time)
+      const session = await db.get('SELECT game_id FROM refinery_sessions WHERE id = ?', [req.params.id]);
+      let resolvedGameId: number | null = session?.game_id ?? null;
+      // Fallback: if session has no game_id (old data), use the first game
+      if (!resolvedGameId) {
+        const g = await db.get('SELECT id FROM games ORDER BY id LIMIT 1');
+        resolvedGameId = g?.id ?? null;
+      }
+
+      if (resolvedGameId) {
+        const completedLines = await db.all(
+          `SELECT output_material, output_quantity FROM refining_jobs WHERE session_id = ? AND output_quantity > 0`,
+          [req.params.id]
+        );
+        for (const line of completedLines as any[]) {
+          await inventoryIn(
+            resolvedGameId,
+            line.output_material,
+            line.output_quantity,
+            null,
+            null,
+            `Refined: ${line.output_material}`,
+          );
+        }
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/refining/sessions/:id', async (req, res) => {
+  try {
+    // Detach lines before deleting session (avoids FK error if lines remain)
+    await db.run('UPDATE refining_jobs SET session_id = NULL WHERE session_id = ?', [req.params.id]);
+    await db.run('DELETE FROM refinery_sessions WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Update individual line's actual output when completing a session
+router.put('/refining/sessions/:sid/lines/:lid', async (req, res) => {
+  const { outputQuantity, outputMaterial, efficiency } = req.body;
+  try {
+    await db.run(`
+      UPDATE refining_jobs SET
+        output_quantity = COALESCE(?, output_quantity),
+        output_material = COALESCE(?, output_material),
+        efficiency      = COALESCE(?, efficiency),
+        status          = 'done'
+      WHERE id = ? AND session_id = ?
+    `, [outputQuantity ?? null, outputMaterial ?? null, efficiency ?? null,
+        req.params.lid, req.params.sid]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Refining jobs (legacy individual, and shared helpers) ────────────────────
 
 // All refining jobs across all runs (must come before /:id routes)
 router.get('/refining/all', async (req, res) => {
@@ -229,7 +395,7 @@ router.get('/refining/all', async (req, res) => {
 });
 
 router.post('/refining', async (req, res) => {
-  const { miningEntryId, bagId, refineryName, refineryMethod, inputQuantity, outputMaterial, costToRefine, startedAt } = req.body;
+  const { miningEntryId, bagId, refineryName, refineryMethod, inputQuantity, outputMaterial, costToRefine, startedAt, durationMinutes } = req.body;
   if (!inputQuantity || !outputMaterial) {
     return res.status(400).json({ error: 'inputQuantity and outputMaterial required' });
   }
@@ -237,8 +403,8 @@ router.post('/refining', async (req, res) => {
     const result = await db.run(
       `INSERT INTO refining_jobs
         (mining_entry_id, bag_id, refinery_name, refinery_method, input_quantity,
-         output_material, cost_to_refine, started_at, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         output_material, cost_to_refine, started_at, duration_minutes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         miningEntryId ?? null,
         bagId ?? null,
@@ -248,6 +414,7 @@ router.post('/refining', async (req, res) => {
         outputMaterial,
         costToRefine ?? 0,
         startedAt ?? null,
+        durationMinutes ?? null,
         'pending',
       ]
     );
@@ -256,7 +423,7 @@ router.post('/refining', async (req, res) => {
 });
 
 router.put('/refining/:id', async (req, res) => {
-  const { refineryName, refineryMethod, outputMaterial, inputQuantity, outputQuantity, efficiency, costToRefine, completedAt, status } = req.body;
+  const { refineryName, refineryMethod, outputMaterial, inputQuantity, outputQuantity, efficiency, costToRefine, completedAt, status, startedAt, durationMinutes } = req.body;
   try {
     await db.run(`
       UPDATE refining_jobs SET
@@ -268,27 +435,40 @@ router.put('/refining/:id', async (req, res) => {
         efficiency       = COALESCE(?, efficiency),
         cost_to_refine   = COALESCE(?, cost_to_refine),
         completed_at     = COALESCE(?, completed_at),
-        status           = COALESCE(?, status)
+        status           = COALESCE(?, status),
+        started_at       = COALESCE(?, started_at),
+        duration_minutes = COALESCE(?, duration_minutes)
       WHERE id = ?
     `, [refineryName ?? null, refineryMethod ?? null, outputMaterial ?? null, inputQuantity ?? null,
         outputQuantity ?? null, efficiency ?? null, costToRefine ?? null,
-        completedAt ?? null, status ?? null, req.params.id]);
+        completedAt ?? null, status ?? null,
+        startedAt ?? null, durationMinutes ?? null,
+        req.params.id]);
 
     // When refining completes, add refined material to inventory
     if (status === 'done' && outputQuantity != null) {
       const rj = await db.get(`
         SELECT rj.output_material,
                COALESCE(me.run_id, mb.run_id) as run_id,
-               COALESCE(r1.game_id, r2.game_id) as game_id
+               COALESCE(r1.game_id, r2.game_id, rs.game_id) as game_id
         FROM refining_jobs rj
-        LEFT JOIN mining_entries me ON rj.mining_entry_id = me.id
-        LEFT JOIN runs r1 ON me.run_id = r1.id
-        LEFT JOIN mining_bags mb ON rj.bag_id = mb.id
-        LEFT JOIN runs r2 ON mb.run_id = r2.id
+        LEFT JOIN mining_entries me  ON rj.mining_entry_id = me.id
+        LEFT JOIN runs r1            ON me.run_id = r1.id
+        LEFT JOIN mining_bags mb     ON rj.bag_id = mb.id
+        LEFT JOIN runs r2            ON mb.run_id = r2.id
+        LEFT JOIN refinery_sessions rs ON rj.session_id = rs.id
         WHERE rj.id = ?
       `, [req.params.id]);
       if (rj) {
-        await inventoryIn(rj.game_id, rj.output_material, outputQuantity, rj.run_id, null, `Refined: ${rj.output_material}`);
+        let gameId: number | null = rj.game_id ?? null;
+        // Hard fallback: use first game (handles old jobs with no bag/entry/session link)
+        if (!gameId) {
+          const g = await db.get('SELECT id FROM games ORDER BY id LIMIT 1');
+          gameId = g?.id ?? null;
+        }
+        if (gameId) {
+          await inventoryIn(gameId, rj.output_material, outputQuantity, rj.run_id, null, `Refined: ${rj.output_material}`);
+        }
       }
     }
 

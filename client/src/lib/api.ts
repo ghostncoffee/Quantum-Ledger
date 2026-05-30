@@ -74,6 +74,16 @@ export const miningApi = {
   removeEntry: (id: number) => del(`/mining/entries/${id}`),
 };
 
+// Refinery sessions (grouped jobs) — routes live under /api/mining/refining/sessions
+export const refinerySessionsApi = {
+  list: () => get('/mining/refining/sessions'),
+  create: (d: unknown) => post('/mining/refining/sessions', d),
+  update: (id: number, d: unknown) => put(`/mining/refining/sessions/${id}`, d),
+  remove: (id: number) => del(`/mining/refining/sessions/${id}`),
+  updateLine: (sessionId: number, lineId: number, d: unknown) =>
+    put(`/mining/refining/sessions/${sessionId}/lines/${lineId}`, d),
+};
+
 // Trading
 export const tradingApi = {
   getForRun: (runId: number) => get(`/trading/run/${runId}`),
@@ -108,6 +118,9 @@ export const haulingApi = {
   create: (d: unknown) => post('/hauling', d),
   update: (id: number, d: unknown) => put(`/hauling/${id}`, d),
   remove: (id: number) => del(`/hauling/${id}`),
+  addLeg: (jobId: number, d: unknown) => post(`/hauling/jobs/${jobId}/legs`, d),
+  updateLeg: (id: number, d: unknown) => put(`/hauling/legs/${id}`, d),
+  removeLeg: (id: number) => del(`/hauling/legs/${id}`),
 };
 
 // Contracts
@@ -142,6 +155,20 @@ export const inventoryApi = {
   getTransactions: (id: number) => get(`/inventory/${id}/transactions`),
   update: (id: number, d: unknown) => put(`/inventory/${id}`, d),
   remove: (id: number) => del(`/inventory/${id}`),
+};
+
+// Salvage
+export const salvageApi = {
+  getForRun: (runId: number) => get(`/salvage/run/${runId}`),
+  getHauls: (gameId?: number) => get('/salvage/hauls', gameId ? { gameId } : undefined),
+  addHaul: (d: unknown) => post('/salvage/hauls', d),
+  updateHaul: (id: number, d: unknown) => put(`/salvage/hauls/${id}`, d),
+  removeHaul: (id: number) => del(`/salvage/hauls/${id}`),
+  commitHaul: (id: number, location: string) => post(`/salvage/hauls/${id}/commit`, { location }),
+  uncommitHaul: (id: number) => del(`/salvage/hauls/${id}/commit`),
+  addLine: (haulId: number, d: unknown) => post(`/salvage/hauls/${haulId}/lines`, d),
+  updateLine: (id: number, d: unknown) => put(`/salvage/lines/${id}`, d),
+  removeLine: (id: number) => del(`/salvage/lines/${id}`),
 };
 
 // Locations

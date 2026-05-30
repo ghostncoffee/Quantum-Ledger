@@ -118,7 +118,7 @@ app.whenReady().then(async () => {
     minWidth: 960,
     minHeight: 600,
     backgroundColor: '#0a0e1a',
-    title: 'Game Ledger',
+    title: 'Star Citizen Ledger',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

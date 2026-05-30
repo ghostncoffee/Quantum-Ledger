@@ -1,8 +1,6 @@
-# Game Ledger
+# Star Citizen Ledger
 
-> Local game economy tracker for Star Citizen, EVE Online, Elite Dangerous, and any other game with an in-game economy.
-
-Track mining runs, trading routes, crafting chains, contracts, crew payouts, and full accounting — all stored locally on your machine. No accounts, no cloud, no internet required.
+> A free, offline desktop app for tracking your Star Citizen economy — hauling contracts, mining runs, trading, refining, salvage, crew payouts and more. All data stays on your machine. No accounts, no cloud, no internet required.
 
 ---
 
@@ -10,38 +8,74 @@ Track mining runs, trading routes, crafting chains, contracts, crew payouts, and
 
 | Module | What it tracks |
 |---|---|
-| **Runs** | Sessions with start/end time, vehicle used, profit-per-hour |
-| **Mining** | Raw ore → refinery → refined output → sale pipeline |
-| **Trading** | Buy low / sell high routes with margin tracking |
-| **Crafting** | Manufacturing chains with material costs and output values |
-| **Contracts** | Combat, hauling, escort, refueling missions and their payouts |
-| **Crew** | Multi-crew sessions with fixed-fee or % profit allocation |
-| **Expenses** | Itemised investments and costs (fuel, repairs, equipment) |
-| **Inventory** | Stock levels with average cost basis |
-| **Accounting** | Full ledger: income, expenses, crew payouts, net profit per game |
+| **Runs** | Session containers — group all activity under a single run |
+| **Hauling** | Multi-leg contracts with per-leg SCU × qty, pickup → drop-off, individual leg completion |
+| **Mining** | Ore bags, per-ore quality lines, check-in at stations |
+| **Refining** | Session queuing with timers, actual vs expected yield, auto-adds output to inventory on completion |
+| **Salvaging** | Haul tracking, commit hauls to stations |
+| **Trading** | Buy by boxes × SCU, cost tracking, auto-adds to inventory until sold |
+| **Crafting** | Job + input materials, optional inventory deduction |
+| **Contracts** | Client contracts with agreed payout and crew splits |
+| **Inventory** | Unified view of everything you own — auto-populated from all modules |
+| **Accounting** | Full ledger, run P&L reports, expense tracking |
+| **Crew** | Members, roles, payout percentages, earnings history |
+| **Vehicles** | Fleet management |
 
 ---
 
-## Installation (Windows)
+## Download
 
-Download the latest release from the [Releases page](../../releases):
+Head to [**Releases**](https://github.com/Axiomancer/star-citizen-ledger/releases) and grab the latest:
 
-- **`Game Ledger-x.x.x-x64-Setup.exe`** — installs to Program Files, adds Start Menu shortcut *(recommended)*
-- **`Game Ledger-x.x.x-x64-Portable.exe`** — no install needed, run from anywhere
+| File | Description |
+|---|---|
+| `Star Citizen Ledger-x.x.x-Setup-x64.exe` | Windows installer — adds Start Menu shortcut + Desktop icon |
+| `Star Citizen Ledger-x.x.x-Portable-x64.exe` | Single executable, no installation needed |
 
-Your data is stored in `%APPDATA%\Game Ledger\data\` and persists across app updates.
+> Your data lives in `%APPDATA%\star-citizen-ledger\data\` and is preserved across app updates.
 
 ---
 
-## Is it offline?
+## Building from source
 
-**Yes, 100%.** Nothing leaves your machine:
+### Prerequisites
 
-- All API calls use relative URLs (`/api/...`) — they go to the embedded Express server running on `127.0.0.1:3001`
-- The database is a local SQLite file at `%APPDATA%\Game Ledger\data\game-ledger.db` via `@libsql/client` with a `file:` URL — no `authToken`, no `syncUrl`, no remote connection
-- The HTML template has no CDN links, no external fonts, no analytics
-- Electron is launched with `--no-proxy-server` and Chrome features `AutoupgradeMixedContent` / `CertificateTransparencyComponentUpdater` disabled
-- A `will-navigate` guard in the main process blocks any navigation away from `127.0.0.1` — even if a third-party library somehow tried to redirect the window
+- [Node.js](https://nodejs.org/) 20+
+- [pnpm](https://pnpm.io/) — `npm install -g pnpm`
+
+### Install
+
+```bash
+pnpm install
+cd client && pnpm install && cd ..
+cd server && pnpm install && cd ..
+```
+
+### Run in development
+
+```bash
+# Terminal 1 — API server (hot-reloads via tsx)
+pnpm run dev:server
+
+# Terminal 2 — Vite dev client
+pnpm run dev:client
+
+# Terminal 3 — Electron shell (connects to Vite automatically)
+cd electron && npm install && npm start
+```
+
+### Build the installer
+
+```bash
+pnpm run package
+```
+
+Output lands in `release/`. The pipeline:
+1. Generates `electron/build-assets/icon.png` from the SVG logo
+2. Compiles the TypeScript server (`server/dist/`)
+3. Builds the React client with Vite (`client/dist/`)
+4. Copies everything into the Electron shell
+5. Runs `electron-builder` → produces `*-Setup-x64.exe` + `*-Portable-x64.exe`
 
 ---
 
@@ -49,87 +83,30 @@ Your data is stored in `%APPDATA%\Game Ledger\data\` and persists across app upd
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite 5 + Tailwind CSS v3 |
-| Backend | Node.js + Express + TypeScript |
-| Database | SQLite via `@libsql/client` (prebuilt N-API binary — no compilation needed) |
-| Desktop | Electron 28 |
-| Packaging | electron-builder (NSIS installer + portable exe) |
-| Monorepo | pnpm workspaces |
+| Frontend | React 19, TypeScript, Vite, TailwindCSS, TanStack Query |
+| Backend | Express, libSQL / SQLite via `@libsql/client` |
+| Desktop | Electron 42 |
+| Packaging | electron-builder (NSIS for Windows) |
 
 ---
 
-## Development
+## Contributing
 
-**Prerequisites:** Node.js 22, pnpm 9
+Issues and PRs welcome. The project is a monorepo:
 
-```powershell
-# Install workspace deps (server + client)
-pnpm install
-
-# Start dev servers (two terminals)
-pnpm run dev:server   # Express on :3001
-pnpm run dev:client   # Vite on :5173 (proxies /api → :3001)
 ```
-
-The client proxies all `/api` requests to the server so hot-reload works seamlessly.
-
-### Building locally
-
-```powershell
-# Full production build + package to release/
-pnpm run package
-
-# Quick test — unpacked directory, no installer (faster)
-pnpm run package:dir
+client/   React + Vite frontend
+server/   Express + SQLite backend
+electron/ Electron shell + build config
+scripts/  Build helpers (icon generation, prepare-electron)
 ```
 
 ---
 
-## Releasing to GitHub
+## License
 
-Releases are automated via GitHub Actions. Push a version tag and the workflow builds the installer + portable exe and attaches them to a GitHub Release automatically.
-
-```powershell
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The workflow (`release.yml`) runs on `windows-latest`, compiles the server and client, packages with electron-builder, and publishes the `.exe` files to the release.
-
-Pre-release tags work too: `v1.0.0-beta.1` is automatically marked as a pre-release.
+MIT — free to use, modify, and distribute.
 
 ---
 
-## Project structure
-
-```
-.
-├── client/          React + Vite frontend
-│   └── src/
-│       ├── components/ui/   Shared UI primitives (Card, Button, Badge, Table, Modal)
-│       ├── hooks/           React Query hooks
-│       ├── lib/             api.ts (all API calls), utils.ts
-│       └── pages/           One file per route (Dashboard, Runs, RunDetail, Mining, …)
-├── server/          Express + TypeScript API
-│   └── src/
-│       ├── db/              @libsql/client wrapper + CREATE TABLE schema + seed data
-│       └── routes/          12 route files (games, crew, vehicles, runs, mining, …)
-├── electron/        Electron main process + packaging config
-│   ├── main.js              Single-instance lock, server startup, BrowserWindow
-│   └── package.json         electron-builder config (NSIS + portable, extraResources)
-├── scripts/
-│   └── prepare-electron.js  Copies server/dist → electron/server-dist before packaging
-└── .github/workflows/
-    └── release.yml          Tag-triggered CI: build → package → publish release
-```
-
----
-
-## Data location
-
-| Context | Path |
-|---|---|
-| Packaged app | `%APPDATA%\Game Ledger\data\game-ledger.db` |
-| Dev / server | `server/data/game-ledger.db` |
-
-The `data/` directories are in `.gitignore` — your game data is never committed.
+*Not affiliated with Cloud Imperium Games or the Star Citizen project.*

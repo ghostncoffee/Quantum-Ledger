@@ -35,7 +35,7 @@ export function profitColor(n: number): string {
   return 'text-slate-400';
 }
 
-export const RUN_TYPES = ['mining', 'trading', 'hauling', 'crafting', 'contract', 'mixed'] as const;
+export const RUN_TYPES = ['mining', 'salvage', 'trading', 'hauling', 'crafting', 'contract', 'mixed'] as const;
 export type RunType = typeof RUN_TYPES[number];
 
 export const CONTRACT_TYPES = ['combat', 'hauling', 'refueling', 'escort', 'other'] as const;

@@ -128,8 +128,21 @@ CREATE TABLE IF NOT EXISTS mining_ore_lines (
   is_inert INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS refinery_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  station TEXT,
+  method TEXT,
+  total_cost REAL DEFAULT 0,
+  started_at TEXT,
+  duration_minutes INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS refining_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER REFERENCES refinery_sessions(id) ON DELETE CASCADE,
   mining_entry_id INTEGER REFERENCES mining_entries(id) ON DELETE CASCADE,
   bag_id INTEGER REFERENCES mining_bags(id) ON DELETE CASCADE,
   refinery_name TEXT,
@@ -141,6 +154,7 @@ CREATE TABLE IF NOT EXISTS refining_jobs (
   cost_to_refine REAL DEFAULT 0,
   started_at TEXT,
   completed_at TEXT,
+  duration_minutes INTEGER,
   status TEXT NOT NULL DEFAULT 'pending'
 );
 
@@ -258,6 +272,36 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   description TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT (date('now')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS salvage_hauls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  label TEXT NOT NULL DEFAULT 'Haul 1',
+  notes TEXT,
+  committed INTEGER NOT NULL DEFAULT 0,
+  committed_location TEXT,
+  committed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS salvage_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  haul_id INTEGER NOT NULL REFERENCES salvage_hauls(id) ON DELETE CASCADE,
+  run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  material TEXT NOT NULL,
+  quantity_scu REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hauling_legs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL REFERENCES hauling_jobs(id) ON DELETE CASCADE,
+  cargo_type TEXT,
+  scu_amount REAL,
+  pickup_location TEXT,
+  dropoff_location TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  completed_at TEXT
 )
 `;
 
@@ -276,6 +320,12 @@ export async function initDb() {
     'ALTER TABLE mining_bags ADD COLUMN committed INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE mining_bags ADD COLUMN committed_location TEXT',
     'ALTER TABLE mining_bags ADD COLUMN committed_at TEXT',
+    'ALTER TABLE refining_jobs ADD COLUMN duration_minutes INTEGER',
+    'ALTER TABLE refining_jobs ADD COLUMN session_id INTEGER REFERENCES refinery_sessions(id) ON DELETE CASCADE',
+    'ALTER TABLE refinery_sessions ADD COLUMN game_id INTEGER REFERENCES games(id)',
+    'ALTER TABLE hauling_legs ADD COLUMN quantity REAL',
+    'ALTER TABLE trading_entries ADD COLUMN box_quantity REAL',
+    'ALTER TABLE trading_entries ADD COLUMN scu_per_box REAL',
   ];
   for (const sql of migrations) {
     try { await db.run(sql); } catch { /* column already exists */ }

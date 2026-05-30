@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   runsApi, miningApi, tradingApi, salesApi, craftingApi,
-  contractsApi, haulingApi, expensesApi, crewApi, inventoryApi,
+  contractsApi, haulingApi, expensesApi, crewApi, inventoryApi, salvageApi,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -13,7 +13,8 @@ import { Modal } from '@/components/ui/Modal';
 import { StatCard } from '@/components/ui/StatCard';
 import { Table, Th, Td, Tr } from '@/components/ui/Table';
 import { fmtCurrency, fmtDuration, fmtDatetime, profitColor, EXPENSE_CATEGORIES, CONTRACT_TYPES } from '@/lib/utils';
-import { Plus, CheckCircle, Trash2, ChevronLeft, ChevronRight, DollarSign, Clock, AlertTriangle, Users, Star, Copy, Pencil, RotateCcw } from 'lucide-react';
+import { mergeOreNames } from '@/lib/ores';
+import { Plus, CheckCircle, Trash2, ChevronLeft, ChevronRight, DollarSign, Clock, AlertTriangle, Users, Star, Copy, Pencil, RotateCcw, X } from 'lucide-react';
 
 // ─── Mining form types — defined outside component so they never change identity ──
 type MineLineForm = { material: string; scu: string; quality: string; is_inert: boolean };
@@ -26,6 +27,11 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['mining', runId], queryFn: () => miningApi.getPipeline(runId) });
   const { entries = [], bags = [] } = (data as any) || {};
+
+  // Build autocomplete list: SC canonical names + names already used in this run
+  const oreDatalist = mergeOreNames(
+    (bags as any[]).flatMap((b: any) => (b.lines || []).map((l: any) => l.material as string).filter(Boolean))
+  );
 
   const inv = () => qc.invalidateQueries({ queryKey: ['mining', runId] });
 
@@ -364,8 +370,12 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
                 )}
 
                 {/* Add ore line */}
+                <datalist id="sc-ores">
+                  {oreDatalist.map(o => <option key={o} value={o} />)}
+                </datalist>
                 <div className="flex gap-2 mt-2 flex-wrap items-center">
                   <input
+                    list="sc-ores"
                     placeholder="Material"
                     className="flex-1 min-w-[130px]"
                     value={lf.material}
@@ -919,7 +929,7 @@ function TradingPanel({ runId, currency }: { runId: number; currency: string }) 
   const qc = useQueryClient();
   const { data: entries = [] } = useQuery({ queryKey: ['trading', runId], queryFn: () => tradingApi.getForRun(runId) });
 
-  const [buyForm, setBuyForm] = useState({ commodity: '', quantityBought: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
+  const [buyForm, setBuyForm] = useState({ commodity: '', boxQuantity: '', scuPerBox: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
   const [sellForm, setSellForm] = useState<{ [entryId: number]: { qty: string; price: string; location: string } }>({});
 
   const addEntry = useMutation({
@@ -952,20 +962,40 @@ function TradingPanel({ runId, currency }: { runId: number; currency: string }) 
         <CardHeader><CardTitle>Buy Commodity</CardTitle></CardHeader>
         <div className="grid grid-cols-3 gap-2">
           <input placeholder="Commodity" value={buyForm.commodity} onChange={e => setBuyForm(f => ({ ...f, commodity: e.target.value }))} />
-          <MathInput placeholder="Qty bought" value={buyForm.quantityBought} onChange={e => setBuyForm(f => ({ ...f, quantityBought: e.target.value }))} />
-          <MathInput placeholder="Buy price/unit" value={buyForm.buyPricePerUnit} onChange={e => setBuyForm(f => ({ ...f, buyPricePerUnit: e.target.value }))} />
+          <div className="flex items-center gap-1.5 col-span-2">
+            <MathInput placeholder="Boxes" className="flex-1" value={buyForm.boxQuantity} onChange={e => setBuyForm(f => ({ ...f, boxQuantity: e.target.value }))} />
+            <span className="text-slate-600 text-xs shrink-0">×</span>
+            <MathInput placeholder="SCU ea" className="flex-1" value={buyForm.scuPerBox} onChange={e => setBuyForm(f => ({ ...f, scuPerBox: e.target.value }))} />
+            {buyForm.boxQuantity && buyForm.scuPerBox && (
+              <span className="text-orange-400 text-xs font-medium shrink-0">
+                = {Number(buyForm.boxQuantity) * Number(buyForm.scuPerBox)} SCU
+              </span>
+            )}
+          </div>
+          <MathInput placeholder="Price per box" value={buyForm.buyPricePerUnit} onChange={e => setBuyForm(f => ({ ...f, buyPricePerUnit: e.target.value }))} />
           <input placeholder="Buy location" value={buyForm.buyLocation} onChange={e => setBuyForm(f => ({ ...f, buyLocation: e.target.value }))} />
           <input placeholder="Planned sell location" value={buyForm.sellLocation} onChange={e => setBuyForm(f => ({ ...f, sellLocation: e.target.value }))} />
-          {buyForm.quantityBought && buyForm.buyPricePerUnit && (
-            <div className="flex items-center text-red-400 text-sm font-semibold">
-              Cost: {fmtCurrency(Number(buyForm.quantityBought) * Number(buyForm.buyPricePerUnit), currency)}
+          {buyForm.boxQuantity && buyForm.buyPricePerUnit && (
+            <div className="flex items-center text-red-400 text-sm font-semibold col-span-3">
+              Cost: {fmtCurrency(Number(buyForm.boxQuantity) * Number(buyForm.buyPricePerUnit), currency)}
             </div>
           )}
         </div>
         <Button className="mt-2" size="sm" onClick={() => {
-          if (!buyForm.commodity || !buyForm.quantityBought || !buyForm.buyPricePerUnit) return;
-          addEntry.mutate({ runId, commodity: buyForm.commodity, quantityBought: Number(buyForm.quantityBought), buyPricePerUnit: Number(buyForm.buyPricePerUnit), buyLocation: buyForm.buyLocation || undefined, sellLocation: buyForm.sellLocation || undefined });
-          setBuyForm({ commodity: '', quantityBought: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
+          const totalQty = buyForm.boxQuantity && buyForm.scuPerBox
+            ? Number(buyForm.boxQuantity) * Number(buyForm.scuPerBox)
+            : 0;
+          if (!buyForm.commodity || !totalQty || !buyForm.buyPricePerUnit) return;
+          addEntry.mutate({
+            runId,
+            commodity:       buyForm.commodity,
+            boxQuantity:     Number(buyForm.boxQuantity),
+            scuPerBox:       Number(buyForm.scuPerBox),
+            buyPricePerUnit: Number(buyForm.buyPricePerUnit),
+            buyLocation:     buyForm.buyLocation  || undefined,
+            sellLocation:    buyForm.sellLocation || undefined,
+          });
+          setBuyForm({ commodity: '', boxQuantity: '', scuPerBox: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
         }}><Plus size={13} /> Record Purchase</Button>
       </Card>
 
@@ -988,7 +1018,14 @@ function TradingPanel({ runId, currency }: { runId: number; currency: string }) 
                   </div>
                 </div>
                 <div className="grid grid-cols-4 gap-3 text-sm mb-3">
-                  <div><p className="text-xs text-slate-500">Bought</p><p className="text-slate-200">{e.quantity_bought} @ {fmtCurrency(e.buy_price_per_unit, currency)}</p></div>
+                  <div>
+                    <p className="text-xs text-slate-500">Bought</p>
+                    {e.box_quantity != null && e.scu_per_box != null
+                      ? <p className="text-orange-400 font-medium">{e.box_quantity} × {e.scu_per_box} = {e.quantity_bought} SCU</p>
+                      : <p className="text-slate-200">{e.quantity_bought} SCU</p>
+                    }
+                    <p className="text-xs text-slate-500">@ {fmtCurrency(e.buy_price_per_unit, currency)}/SCU</p>
+                  </div>
                   <div><p className="text-xs text-slate-500">Cost</p><p className="text-red-400">{fmtCurrency(e.total_cost, currency)}</p></div>
                   <div><p className="text-xs text-slate-500">Revenue</p><p className="text-emerald-400">{fmtCurrency(e.revenue, currency)}</p></div>
                   <div><p className="text-xs text-slate-500">Margin</p><p className={margin != null ? profitColor(margin) : 'text-slate-500'}>{margin != null ? fmtCurrency(margin, currency) : '—'}</p></div>
@@ -1025,204 +1062,564 @@ function HaulingPanel({ runId, currency }: { runId: number; currency: string }) 
     queryFn: () => haulingApi.getForRun(runId),
   });
 
-  const [form, setForm] = useState({
-    cargoType: '', scuAmount: '', pickupLocation: '',
-    deliveryLocation: '', agreedPayout: '', bonusPayout: '', notes: '',
-  });
-  const [editingJob, setEditingJob] = useState<Record<number, any>>({});
+  type LegDraft = { key: string; cargoType: string; quantity: string; scuAmount: string; pickupLocation: string; dropoffLocation: string };
+  const newLeg = (): LegDraft => ({ key: Math.random().toString(36).slice(2), cargoType: '', quantity: '', scuAmount: '', pickupLocation: '', dropoffLocation: '' });
 
-  const add = useMutation({
-    mutationFn: (d: unknown) => haulingApi.create(d),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['hauling', runId] });
-      qc.invalidateQueries({ queryKey: ['run', runId] });
-    },
-  });
-  const remove = useMutation({
-    mutationFn: (id: number) => haulingApi.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['hauling', runId] });
-      qc.invalidateQueries({ queryKey: ['run', runId] });
-    },
-  });
-  const advance = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: string }) =>
-      haulingApi.update(id, { status }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['hauling', runId] });
-      qc.invalidateQueries({ queryKey: ['run', runId] });
-    },
-  });
-  const update = useMutation({
-    mutationFn: ({ id, d }: { id: number; d: unknown }) => haulingApi.update(id, d),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['hauling', runId] });
-      qc.invalidateQueries({ queryKey: ['run', runId] });
-    },
-  });
+  const [form, setForm] = useState({ agreedPayout: '', bonusPayout: '', notes: '', defaultPickup: '', defaultDropoff: '', legs: [newLeg()] });
+  const [addingLeg,     setAddingLeg]     = useState<Record<number, LegDraft>>({});
+  const [editingJob,    setEditingJob]    = useState<Record<number, any>>({});
+  const [editingLeg,    setEditingLeg]    = useState<Record<number, any>>({});
+  const [openJobs,      setOpenJobs]      = useState<Record<number, boolean>>({});
+  const [openDoneLegs,  setOpenDoneLegs]  = useState<Record<number, boolean>>({});
+  const [doneJobsOpen,  setDoneJobsOpen]  = useState(false);
 
-  const deliveredTotal = (jobs as any[])
-    .filter((j: any) => j.status === 'delivered')
-    .reduce((s: number, j: any) => s + j.agreed_payout + (j.bonus_payout || 0), 0);
-  const pendingTotal = (jobs as any[])
-    .filter((j: any) => j.status !== 'delivered')
-    .reduce((s: number, j: any) => s + j.agreed_payout, 0);
+  const inv = () => {
+    qc.invalidateQueries({ queryKey: ['hauling', runId] });
+    qc.invalidateQueries({ queryKey: ['run', runId] });
+  };
+  const add       = useMutation({ mutationFn: (d: unknown)                              => haulingApi.create(d),                onSuccess: inv });
+  const remove    = useMutation({ mutationFn: (id: number)                              => haulingApi.remove(id),               onSuccess: inv });
+  const updateJob = useMutation({ mutationFn: ({ id, d }: { id: number; d: unknown })   => haulingApi.update(id, d),            onSuccess: inv });
+  const addLeg    = useMutation({ mutationFn: ({ jobId, d }: { jobId: number; d: unknown }) => haulingApi.addLeg(jobId, d),     onSuccess: inv });
+  const updLeg    = useMutation({ mutationFn: ({ id, d }: { id: number; d: unknown })   => haulingApi.updateLeg(id, d),        onSuccess: inv });
+  const delLeg    = useMutation({ mutationFn: (id: number)                              => haulingApi.removeLeg(id),           onSuccess: inv });
 
-  const NEXT_STATUS: Record<string, string> = { pending: 'in_transit', in_transit: 'delivered' };
-  const NEXT_LABEL: Record<string, string> = { pending: 'Mark Picked Up', in_transit: 'Mark Delivered' };
+  const totalEarned  = (jobs as any[]).filter((j: any) => j.status === 'delivered').reduce((s: number, j: any) => s + j.agreed_payout + (j.bonus_payout || 0), 0);
+  const totalPending = (jobs as any[]).filter((j: any) => j.status !== 'delivered').reduce((s: number, j: any) => s + j.agreed_payout, 0);
+
+  const NEXT: Record<string, { status: string; label: string }> = {
+    pending:    { status: 'in_transit', label: 'Mark Picked Up' },
+    in_transit: { status: 'delivered',  label: 'Mark Delivered' },
+  };
+
+  const setLegForm   = (key: string, p: Partial<LegDraft>) =>
+    setForm(f => ({ ...f, legs: f.legs.map(l => l.key === key ? { ...l, ...p } : l) }));
+  const removeFormLeg = (key: string) =>
+    setForm(f => ({ ...f, legs: f.legs.filter(l => l.key !== key) }));
+
+  const submitForm = () => {
+    if (!form.agreedPayout) return;
+    const legs = form.legs.filter(l => l.cargoType || l.pickupLocation || l.dropoffLocation || l.scuAmount);
+    add.mutate({
+      runId,
+      agreedPayout:     Number(form.agreedPayout),
+      bonusPayout:      Number(form.bonusPayout) || 0,
+      notes:            form.notes || undefined,
+      pickupLocation:   form.defaultPickup   || undefined,
+      deliveryLocation: form.defaultDropoff  || undefined,
+      legs: legs.map(l => ({
+        cargoType:       l.cargoType       || undefined,
+        quantity:        l.quantity        ? Number(l.quantity)  : undefined,
+        scuAmount:       l.scuAmount       ? Number(l.scuAmount) : undefined,
+        pickupLocation:  l.pickupLocation  || undefined,
+        dropoffLocation: l.dropoffLocation || undefined,
+      })),
+    });
+    setForm({ agreedPayout: '', bonusPayout: '', notes: '', defaultPickup: '', defaultDropoff: '', legs: [newLeg()] });
+  };
 
   return (
     <div className="space-y-4">
       {(jobs as any[]).length > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Contracts" value={String((jobs as any[]).length)} />
-          <StatCard label="Earned" value={fmtCurrency(deliveredTotal, currency)} trend="up" />
-          <StatCard label="Pending" value={fmtCurrency(pendingTotal, currency)} />
+          <StatCard label="Contracts"   value={String((jobs as any[]).length)} />
+          <StatCard label="Earned"      value={fmtCurrency(totalEarned,  currency)} trend="up" />
+          <StatCard label="Pending"     value={fmtCurrency(totalPending, currency)} />
         </div>
       )}
 
+      {/* ── Add Contract Form ── */}
       <Card>
         <CardHeader><CardTitle>Add Hauling Contract</CardTitle></CardHeader>
-        <div className="grid grid-cols-3 gap-2">
-          <input placeholder="Cargo type (e.g. Medical Supplies)" value={form.cargoType} onChange={e => setForm(f => ({ ...f, cargoType: e.target.value }))} />
-          <MathInput placeholder="SCU amount" value={form.scuAmount} onChange={e => setForm(f => ({ ...f, scuAmount: e.target.value }))} />
-          <MathInput placeholder="Agreed payout" value={form.agreedPayout} onChange={e => setForm(f => ({ ...f, agreedPayout: e.target.value }))} />
-          <input placeholder="Pickup location" value={form.pickupLocation} onChange={e => setForm(f => ({ ...f, pickupLocation: e.target.value }))} />
-          <input placeholder="Delivery location" value={form.deliveryLocation} onChange={e => setForm(f => ({ ...f, deliveryLocation: e.target.value }))} />
-          <MathInput placeholder="Bonus (optional)" value={form.bonusPayout} onChange={e => setForm(f => ({ ...f, bonusPayout: e.target.value }))} />
-          <input placeholder="Notes (optional)" className="col-span-3" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+
+        {/* Job-level fields */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <MathInput placeholder="Agreed payout *" value={form.agreedPayout}
+            onChange={e => setForm(f => ({ ...f, agreedPayout: e.target.value }))} />
+          <MathInput placeholder="Bonus (optional)" value={form.bonusPayout}
+            onChange={e => setForm(f => ({ ...f, bonusPayout: e.target.value }))} />
+          <input placeholder="Notes (optional)" value={form.notes}
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
         </div>
-        <Button className="mt-2" size="sm" onClick={() => {
-          if (!form.agreedPayout) return;
-          add.mutate({
-            runId,
-            cargoType: form.cargoType || undefined,
-            scuAmount: form.scuAmount ? Number(form.scuAmount) : undefined,
-            pickupLocation: form.pickupLocation || undefined,
-            deliveryLocation: form.deliveryLocation || undefined,
-            agreedPayout: Number(form.agreedPayout),
-            bonusPayout: Number(form.bonusPayout) || 0,
-            notes: form.notes || undefined,
-          });
-          setForm({ cargoType: '', scuAmount: '', pickupLocation: '', deliveryLocation: '', agreedPayout: '', bonusPayout: '', notes: '' });
-        }}><Plus size={13} /> Add Contract</Button>
+
+        {/* Default route — propagates to all legs */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs text-slate-500 shrink-0">Default route:</span>
+          <input placeholder="Default pickup" className="flex-1 min-w-[110px]" value={form.defaultPickup}
+            onChange={e => {
+              const val = e.target.value;
+              setForm(f => ({
+                ...f,
+                defaultPickup: val,
+                legs: f.legs.map(l =>
+                  (!l.pickupLocation || l.pickupLocation === f.defaultPickup)
+                    ? { ...l, pickupLocation: val } : l
+                ),
+              }));
+            }} />
+          <span className="text-slate-600 text-xs shrink-0">→</span>
+          <input placeholder="Default drop-off" className="flex-1 min-w-[110px]" value={form.defaultDropoff}
+            onChange={e => {
+              const val = e.target.value;
+              setForm(f => ({
+                ...f,
+                defaultDropoff: val,
+                legs: f.legs.map(l =>
+                  (!l.dropoffLocation || l.dropoffLocation === f.defaultDropoff)
+                    ? { ...l, dropoffLocation: val } : l
+                ),
+              }));
+            }} />
+        </div>
+
+        {/* Leg rows */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pickup &amp; Delivery Legs</p>
+            <Button size="sm" variant="secondary"
+              onClick={() => setForm(f => ({ ...f, legs: [...f.legs, { ...newLeg(), pickupLocation: f.defaultPickup, dropoffLocation: f.defaultDropoff }] }))}>
+              <Plus size={11} /> Add leg
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {form.legs.map((leg, idx) => (
+              <div key={leg.key} className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-600 w-4 shrink-0">{idx + 1}.</span>
+                <div className="flex-1 min-w-[120px]">
+                  <input placeholder="Cargo type" value={leg.cargoType}
+                    onChange={e => setLegForm(leg.key, { cargoType: e.target.value })} />
+                </div>
+                <div className="w-14">
+                  <MathInput placeholder="Qty" value={leg.quantity}
+                    onChange={e => setLegForm(leg.key, { quantity: e.target.value })} />
+                </div>
+                <span className="text-slate-600 text-xs shrink-0">×</span>
+                <div className="w-20">
+                  <MathInput placeholder="SCU ea" value={leg.scuAmount}
+                    onChange={e => setLegForm(leg.key, { scuAmount: e.target.value })} />
+                </div>
+                <div className="flex-1 min-w-[110px]">
+                  <input placeholder="Pickup location" value={leg.pickupLocation}
+                    onChange={e => setLegForm(leg.key, { pickupLocation: e.target.value })} />
+                </div>
+                <span className="text-slate-600 text-xs shrink-0">→</span>
+                <div className="flex-1 min-w-[110px]">
+                  <input placeholder="Drop-off location" value={leg.dropoffLocation}
+                    onChange={e => setLegForm(leg.key, { dropoffLocation: e.target.value })} />
+                </div>
+                {form.legs.length > 1 && (
+                  <button onClick={() => removeFormLeg(leg.key)}
+                    className="text-slate-600 hover:text-red-400 shrink-0">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Button size="sm" onClick={submitForm} disabled={!form.agreedPayout}>
+          <Plus size={13} /> Add Contract
+        </Button>
       </Card>
 
-      {(jobs as any[]).length > 0 && (
-        <div className="space-y-3">
-          {(jobs as any[]).map((j: any) => {
-            const ej = editingJob[j.id];
-            return (
-              <Card key={j.id}>
-                {ej ? (
-                  /* ── Edit mode ── */
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">Cargo type</p>
-                        <input value={ej.cargo_type || ''} placeholder="Cargo type" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], cargo_type: e.target.value } }))} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">SCU amount</p>
-                        <MathInput value={ej.scu_amount != null ? String(ej.scu_amount) : ''} placeholder="SCU" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], scu_amount: e.target.value } }))} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">Agreed payout</p>
-                        <MathInput value={String(ej.agreed_payout ?? '')} onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], agreed_payout: e.target.value } }))} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">Pickup</p>
-                        <input value={ej.pickup_location || ''} placeholder="Pickup location" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], pickup_location: e.target.value } }))} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">Delivery</p>
-                        <input value={ej.delivery_location || ''} placeholder="Delivery location" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], delivery_location: e.target.value } }))} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-1">Bonus</p>
-                        <MathInput value={ej.bonus_payout != null ? String(ej.bonus_payout) : ''} placeholder="Bonus" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], bonus_payout: e.target.value } }))} />
-                      </div>
-                      <div className="col-span-2 sm:col-span-3">
-                        <p className="text-xs text-slate-500 mb-1">Notes</p>
-                        <input value={ej.notes || ''} placeholder="Notes (optional)" onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], notes: e.target.value } }))} />
-                      </div>
+      {/* ── Job cards (shared renderer) ── */}
+      {(() => {
+        const activeJobs = (jobs as any[]).filter((j: any) => j.status !== 'delivered');
+        const doneJobs   = (jobs as any[]).filter((j: any) => j.status === 'delivered');
+
+        const renderJobCard = (j: any) => {
+          const legs    = j.legs || [];
+          const hasLegs = legs.length > 0;
+          const ej      = editingJob[j.id];
+          const addingL = addingLeg[j.id];
+
+          const isOpen   = openJobs[j.id] !== undefined ? openJobs[j.id] : true;
+          const toggleOpen = () => setOpenJobs(f => ({ ...f, [j.id]: !isOpen }));
+
+          const activeLegs  = legs.filter((l: any) => l.status !== 'delivered');
+          const doneLegs    = legs.filter((l: any) => l.status === 'delivered');
+          const doneLegsOpen = openDoneLegs[j.id] ?? false;
+
+          return (
+            <Card key={j.id}>
+              {ej ? (
+                /* ── Edit job ── */
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Agreed payout</p>
+                      <MathInput value={String(ej.agreed_payout ?? '')}
+                        onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], agreed_payout: e.target.value } }))} />
                     </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => {
-                        update.mutate({ id: j.id, d: {
-                          cargoType: ej.cargo_type || undefined,
-                          scuAmount: ej.scu_amount !== '' && ej.scu_amount != null ? Number(ej.scu_amount) : undefined,
-                          pickupLocation: ej.pickup_location || undefined,
-                          deliveryLocation: ej.delivery_location || undefined,
-                          agreedPayout: Number(ej.agreed_payout),
-                          bonusPayout: ej.bonus_payout !== '' && ej.bonus_payout != null ? Number(ej.bonus_payout) : 0,
-                          notes: ej.notes || undefined,
-                        }});
-                        setEditingJob(f => { const n = { ...f }; delete n[j.id]; return n; });
-                      }}><CheckCircle size={12} /> Save</Button>
-                      <Button size="sm" variant="secondary" onClick={() => setEditingJob(f => { const n = { ...f }; delete n[j.id]; return n; })}>Cancel</Button>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Bonus</p>
+                      <MathInput value={ej.bonus_payout != null ? String(ej.bonus_payout) : ''} placeholder="0"
+                        onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], bonus_payout: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Notes</p>
+                      <input value={ej.notes || ''} placeholder="Notes"
+                        onChange={e => setEditingJob(f => ({ ...f, [j.id]: { ...f[j.id], notes: e.target.value } }))} />
                     </div>
                   </div>
-                ) : (
-                  /* ── Display mode ── */
-                  <>
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <span className="font-semibold text-slate-200">{j.cargo_type || 'Unnamed cargo'}</span>
-                        {j.scu_amount != null && (
-                          <span className="ml-2 text-sm text-slate-400">{j.scu_amount} SCU</span>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => {
+                      updateJob.mutate({ id: j.id, d: {
+                        agreedPayout: Number(ej.agreed_payout),
+                        bonusPayout:  Number(ej.bonus_payout) || 0,
+                        notes:        ej.notes || undefined,
+                      }});
+                      setEditingJob(f => { const n = { ...f }; delete n[j.id]; return n; });
+                    }}><CheckCircle size={12} /> Save</Button>
+                    <Button size="sm" variant="secondary"
+                      onClick={() => setEditingJob(f => { const n = { ...f }; delete n[j.id]; return n; })}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* ── Collapsible header ── */}
+                  <div className="flex items-center gap-2">
+                    <button onClick={toggleOpen} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                      <ChevronRight size={13} className={`text-slate-500 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`} />
+                      <span className="font-semibold text-slate-200 truncate">
+                        {hasLegs
+                          ? `${activeLegs.length}/${legs.length} legs remaining${(() => { const t = legs.reduce((s: number, l: any) => s + ((l.quantity || 1) * (l.scu_amount || 0)), 0); return t > 0 ? ` · ${t} SCU` : ''; })()}`
+                          : (j.cargo_type || 'Unnamed cargo')}
+                      </span>
+                      <Badge label={j.status} />
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-sm text-emerald-400 font-semibold mr-1">
+                        {fmtCurrency(j.agreed_payout + (j.bonus_payout || 0), currency)}
+                      </span>
+                      <Button size="sm" variant="secondary"
+                        onClick={() => setEditingJob(f => ({ ...f, [j.id]: { ...j } }))} title="Edit">
+                        <Pencil size={11} />
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => remove.mutate(j.id)}>
+                        <Trash2 size={12} />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* ── Collapsible body ── */}
+                  {isOpen && (
+                    <div className="mt-3">
+                      {/* Payout strip */}
+                      <div className="flex gap-4 text-sm mb-3 flex-wrap">
+                        <div>
+                          <p className="text-xs text-slate-500">Payout</p>
+                          <p className="text-emerald-400 font-semibold">{fmtCurrency(j.agreed_payout, currency)}</p>
+                        </div>
+                        {(j.bonus_payout || 0) > 0 && (
+                          <div>
+                            <p className="text-xs text-slate-500">Bonus</p>
+                            <p className="text-amber-400">{fmtCurrency(j.bonus_payout, currency)}</p>
+                          </div>
                         )}
                         {(j.pickup_location || j.delivery_location) && (
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {j.pickup_location || '?'} → {j.delivery_location || '?'}
-                          </p>
+                          <div>
+                            <p className="text-xs text-slate-500">Route</p>
+                            <p className="text-xs text-slate-400">{j.pickup_location || '?'} → {j.delivery_location || '?'}</p>
+                          </div>
                         )}
-                        {j.notes && <p className="text-xs text-slate-500 italic mt-0.5">{j.notes}</p>}
+                        {j.notes && (
+                          <div>
+                            <p className="text-xs text-slate-500">Notes</p>
+                            <p className="text-xs text-slate-400 italic">{j.notes}</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge label={j.status} />
-                        <Button size="sm" variant="secondary" onClick={() => setEditingJob(f => ({ ...f, [j.id]: { ...j } }))} title="Edit">
-                          <Pencil size={11} />
-                        </Button>
-                        <Button variant="danger" size="sm" onClick={() => remove.mutate(j.id)}>
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-3 text-sm">
-                      <div>
-                        <p className="text-xs text-slate-500">Payout</p>
-                        <p className="text-emerald-400 font-semibold">{fmtCurrency(j.agreed_payout, currency)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500">Bonus</p>
-                        <p className="text-amber-400">{j.bonus_payout ? fmtCurrency(j.bonus_payout, currency) : '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500">Total</p>
-                        <p className="text-emerald-400">{fmtCurrency(j.agreed_payout + (j.bonus_payout || 0), currency)}</p>
-                      </div>
-                    </div>
+                      {/* Active legs */}
+                      {hasLegs && (
+                        <div className="space-y-0.5 border-t border-slate-700/30 pt-2 mb-2">
+                          {activeLegs.map((leg: any) => {
+                            const el       = editingLeg[leg.id];
+                            const nextStep = NEXT[leg.status];
+                            if (el) {
+                              return (
+                                <div key={leg.id} className="flex items-center gap-1.5 flex-wrap py-1.5">
+                                  <div className="flex-1 min-w-[120px]">
+                                    <input placeholder="Cargo" value={el.cargo_type || ''}
+                                      onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], cargo_type: e.target.value } }))} />
+                                  </div>
+                                  <div className="w-14">
+                                    <MathInput placeholder="Qty" value={el.quantity != null ? String(el.quantity) : ''}
+                                      onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], quantity: e.target.value } }))} />
+                                  </div>
+                                  <span className="text-slate-600 text-xs shrink-0">×</span>
+                                  <div className="w-20">
+                                    <MathInput placeholder="SCU ea" value={el.scu_amount != null ? String(el.scu_amount) : ''}
+                                      onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], scu_amount: e.target.value } }))} />
+                                  </div>
+                                  <div className="flex-1 min-w-[110px]">
+                                    <input placeholder="Pickup" value={el.pickup_location || ''}
+                                      onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], pickup_location: e.target.value } }))} />
+                                  </div>
+                                  <div className="flex-1 min-w-[110px]">
+                                    <input placeholder="Drop-off" value={el.dropoff_location || ''}
+                                      onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], dropoff_location: e.target.value } }))} />
+                                  </div>
+                                  <div className="flex gap-1 shrink-0">
+                                    <Button size="sm" onClick={() => {
+                                      updLeg.mutate({ id: leg.id, d: {
+                                        cargoType:       el.cargo_type       || undefined,
+                                        quantity:        el.quantity !== '' && el.quantity != null ? Number(el.quantity) : undefined,
+                                        scuAmount:       el.scu_amount !== '' && el.scu_amount != null ? Number(el.scu_amount) : undefined,
+                                        pickupLocation:  el.pickup_location  || undefined,
+                                        dropoffLocation: el.dropoff_location || undefined,
+                                      }});
+                                      setEditingLeg(f => { const n = { ...f }; delete n[leg.id]; return n; });
+                                    }}><CheckCircle size={11} /></Button>
+                                    <Button size="sm" variant="secondary"
+                                      onClick={() => setEditingLeg(f => { const n = { ...f }; delete n[leg.id]; return n; })}>
+                                      <X size={11} />
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={leg.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800/30 transition-colors">
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${leg.status === 'in_transit' ? 'bg-amber-400 animate-pulse' : 'bg-slate-600'}`} />
+                                <div className="flex-1 min-w-0 text-xs flex items-center gap-1.5 flex-wrap">
+                                  {leg.cargo_type && <span className="font-medium text-slate-200">{leg.cargo_type}</span>}
+                                  {leg.scu_amount != null && (
+                                    <span className="text-orange-400">
+                                      {leg.quantity != null
+                                        ? `${leg.quantity} × ${leg.scu_amount} = ${leg.quantity * leg.scu_amount} SCU`
+                                        : `${leg.scu_amount} SCU`}
+                                    </span>
+                                  )}
+                                  {(leg.pickup_location || leg.dropoff_location) && (
+                                    <span className="text-slate-500">{leg.pickup_location || '?'} → {leg.dropoff_location || '?'}</span>
+                                  )}
+                                  {leg.status === 'in_transit' && <Badge label="picked up" />}
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {nextStep && (
+                                    <Button size="sm" variant={leg.status === 'in_transit' ? 'primary' : 'secondary'}
+                                      onClick={() => updLeg.mutate({ id: leg.id, d: { status: nextStep.status } })}>
+                                      <CheckCircle size={10} /> {nextStep.label}
+                                    </Button>
+                                  )}
+                                  <Button size="sm" variant="secondary"
+                                    onClick={() => setEditingLeg(f => ({ ...f, [leg.id]: { ...leg } }))}>
+                                    <Pencil size={10} />
+                                  </Button>
+                                  <Button variant="danger" size="sm" onClick={() => delLeg.mutate(leg.id)}>
+                                    <Trash2 size={10} />
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
 
-                    {j.status !== 'delivered' && NEXT_STATUS[j.status] && (
-                      <div className="mt-2 pt-2 border-t border-[#1e2d4f]">
-                        <Button
-                          size="sm"
-                          variant={j.status === 'in_transit' ? 'primary' : 'secondary'}
-                          onClick={() => advance.mutate({ id: j.id, status: NEXT_STATUS[j.status] })}
-                        >
-                          <CheckCircle size={12} /> {NEXT_LABEL[j.status]}
+                          {/* Delivered legs — collapsed sub-section */}
+                          {doneLegs.length > 0 && (
+                            <div className="mt-1">
+                              <button
+                                onClick={() => setOpenDoneLegs(f => ({ ...f, [j.id]: !doneLegsOpen }))}
+                                className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-400 pl-1 py-1">
+                                <ChevronRight size={11} className={`transition-transform ${doneLegsOpen ? 'rotate-90' : ''}`} />
+                                Delivered ({doneLegs.length})
+                              </button>
+                              {doneLegsOpen && (
+                                <div className="space-y-0.5 ml-2 mt-0.5">
+                                  {doneLegs.map((leg: any) => {
+                                    const el = editingLeg[leg.id];
+                                    if (el) {
+                                      return (
+                                        <div key={leg.id} className="flex items-center gap-1.5 flex-wrap py-1.5">
+                                          <div className="flex-1 min-w-[120px]">
+                                            <input placeholder="Cargo" value={el.cargo_type || ''}
+                                              onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], cargo_type: e.target.value } }))} />
+                                          </div>
+                                          <div className="w-14">
+                                            <MathInput placeholder="Qty" value={el.quantity != null ? String(el.quantity) : ''}
+                                              onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], quantity: e.target.value } }))} />
+                                          </div>
+                                          <span className="text-slate-600 text-xs shrink-0">×</span>
+                                          <div className="w-20">
+                                            <MathInput placeholder="SCU ea" value={el.scu_amount != null ? String(el.scu_amount) : ''}
+                                              onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], scu_amount: e.target.value } }))} />
+                                          </div>
+                                          <div className="flex-1 min-w-[110px]">
+                                            <input placeholder="Pickup" value={el.pickup_location || ''}
+                                              onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], pickup_location: e.target.value } }))} />
+                                          </div>
+                                          <div className="flex-1 min-w-[110px]">
+                                            <input placeholder="Drop-off" value={el.dropoff_location || ''}
+                                              onChange={e => setEditingLeg(f => ({ ...f, [leg.id]: { ...f[leg.id], dropoff_location: e.target.value } }))} />
+                                          </div>
+                                          <div className="flex gap-1 shrink-0">
+                                            <Button size="sm" onClick={() => {
+                                              updLeg.mutate({ id: leg.id, d: {
+                                                cargoType:       el.cargo_type       || undefined,
+                                                quantity:        el.quantity !== '' && el.quantity != null ? Number(el.quantity) : undefined,
+                                                scuAmount:       el.scu_amount !== '' && el.scu_amount != null ? Number(el.scu_amount) : undefined,
+                                                pickupLocation:  el.pickup_location  || undefined,
+                                                dropoffLocation: el.dropoff_location || undefined,
+                                              }});
+                                              setEditingLeg(f => { const n = { ...f }; delete n[leg.id]; return n; });
+                                            }}><CheckCircle size={11} /></Button>
+                                            <Button size="sm" variant="secondary"
+                                              onClick={() => setEditingLeg(f => { const n = { ...f }; delete n[leg.id]; return n; })}>
+                                              <X size={11} />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return (
+                                      <div key={leg.id} className="flex items-center gap-2 px-2 py-1 rounded-lg opacity-50">
+                                        <div className="w-2 h-2 rounded-full shrink-0 bg-emerald-400" />
+                                        <div className="flex-1 min-w-0 text-xs flex items-center gap-1.5 flex-wrap">
+                                          {leg.cargo_type && <span className="line-through text-slate-500">{leg.cargo_type}</span>}
+                                          {leg.scu_amount != null && (
+                                            <span className="text-slate-500">
+                                              {leg.quantity != null
+                                                ? `${leg.quantity} × ${leg.scu_amount} = ${leg.quantity * leg.scu_amount} SCU`
+                                                : `${leg.scu_amount} SCU`}
+                                            </span>
+                                          )}
+                                          {(leg.pickup_location || leg.dropoff_location) && (
+                                            <span className="text-slate-600">{leg.pickup_location || '?'} → {leg.dropoff_location || '?'}</span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <Button size="sm" variant="secondary"
+                                            onClick={() => setEditingLeg(f => ({ ...f, [leg.id]: { ...leg } }))}>
+                                            <Pencil size={10} />
+                                          </Button>
+                                          <Button variant="danger" size="sm" onClick={() => delLeg.mutate(leg.id)}>
+                                            <Trash2 size={10} />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Legacy single-loc fallback */}
+                      {!hasLegs && (j.pickup_location || j.delivery_location) && (
+                        <p className="text-xs text-slate-500 mb-2">
+                          {j.pickup_location || '?'} → {j.delivery_location || '?'}
+                          {j.scu_amount != null && ` · ${j.scu_amount} SCU`}
+                        </p>
+                      )}
+                      {!hasLegs && j.status !== 'delivered' && NEXT[j.status] && (
+                        <Button size="sm" variant={j.status === 'in_transit' ? 'primary' : 'secondary'}
+                          onClick={() => updateJob.mutate({ id: j.id, d: { status: NEXT[j.status].status } })}>
+                          <CheckCircle size={12} /> {NEXT[j.status].label}
                         </Button>
-                      </div>
-                    )}
-                  </>
+                      )}
+
+                      {/* Add leg inline */}
+                      {addingL ? (
+                        <div className={`flex items-center gap-1.5 flex-wrap pt-2 ${hasLegs ? 'border-t border-slate-700/30' : ''}`}>
+                          <div className="flex-1 min-w-[120px]">
+                            <input placeholder="Cargo type" value={addingL.cargoType}
+                              onChange={e => setAddingLeg(f => ({ ...f, [j.id]: { ...f[j.id], cargoType: e.target.value } }))} />
+                          </div>
+                          <div className="w-14">
+                            <MathInput placeholder="Qty" value={addingL.quantity}
+                              onChange={e => setAddingLeg(f => ({ ...f, [j.id]: { ...f[j.id], quantity: e.target.value } }))} />
+                          </div>
+                          <span className="text-slate-600 text-xs shrink-0">×</span>
+                          <div className="w-20">
+                            <MathInput placeholder="SCU ea" value={addingL.scuAmount}
+                              onChange={e => setAddingLeg(f => ({ ...f, [j.id]: { ...f[j.id], scuAmount: e.target.value } }))} />
+                          </div>
+                          <div className="flex-1 min-w-[110px]">
+                            <input placeholder="Pickup" value={addingL.pickupLocation}
+                              onChange={e => setAddingLeg(f => ({ ...f, [j.id]: { ...f[j.id], pickupLocation: e.target.value } }))} />
+                          </div>
+                          <div className="flex-1 min-w-[110px]">
+                            <input placeholder="Drop-off" value={addingL.dropoffLocation}
+                              onChange={e => setAddingLeg(f => ({ ...f, [j.id]: { ...f[j.id], dropoffLocation: e.target.value } }))} />
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="sm" onClick={() => {
+                              addLeg.mutate({ jobId: j.id, d: {
+                                cargoType:       addingL.cargoType       || undefined,
+                                quantity:        addingL.quantity        ? Number(addingL.quantity) : undefined,
+                                scuAmount:       addingL.scuAmount       ? Number(addingL.scuAmount) : undefined,
+                                pickupLocation:  addingL.pickupLocation  || undefined,
+                                dropoffLocation: addingL.dropoffLocation || undefined,
+                              }});
+                              setAddingLeg(f => { const n = { ...f }; delete n[j.id]; return n; });
+                            }}><CheckCircle size={11} /> Add</Button>
+                            <Button size="sm" variant="secondary"
+                              onClick={() => setAddingLeg(f => { const n = { ...f }; delete n[j.id]; return n; })}>
+                              <X size={11} />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`mt-1 ${hasLegs ? 'border-t border-slate-700/30 pt-2' : ''}`}>
+                          <Button size="sm" variant="secondary"
+                            onClick={() => setAddingLeg(f => ({
+                              ...f,
+                              [j.id]: { key: '', cargoType: '', quantity: '', scuAmount: '', pickupLocation: j.pickup_location || '', dropoffLocation: j.delivery_location || '' },
+                            }))}>
+                            <Plus size={11} /> Add Leg
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+          );
+        };
+
+        return (
+          <>
+            {/* Active contracts */}
+            {activeJobs.length > 0 && (
+              <div className="space-y-3">
+                {activeJobs.map(renderJobCard)}
+              </div>
+            )}
+
+            {/* Completed contracts — collapsed card */}
+            {doneJobs.length > 0 && (
+              <Card>
+                <button className="flex items-center gap-2 w-full text-left"
+                  onClick={() => setDoneJobsOpen(v => !v)}>
+                  <ChevronRight size={13} className={`text-slate-500 transition-transform ${doneJobsOpen ? 'rotate-90' : ''}`} />
+                  <CardTitle>Completed ({doneJobs.length})</CardTitle>
+                  <span className="text-xs text-emerald-400 ml-1">
+                    {fmtCurrency(doneJobs.reduce((s: number, j: any) => s + j.agreed_payout + (j.bonus_payout || 0), 0), currency)} earned
+                  </span>
+                </button>
+                {doneJobsOpen && (
+                  <div className="mt-3 space-y-3">
+                    {doneJobs.map(renderJobCard)}
+                  </div>
                 )}
               </Card>
-            );
-          })}
-        </div>
-      )}
+            )}
+
+            {(jobs as any[]).length === 0 && (
+              <div className="text-center py-8">
+                <p className="text-slate-500 text-sm">No hauling contracts yet — add one above.</p>
+              </div>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -2152,8 +2549,191 @@ function DeleteRunModal({ runId, runTitle, open, onClose }: { runId: number; run
   );
 }
 
+// ─── Sub-panel: Salvage ───────────────────────────────────────────────────────
+function SalvagePanel({ runId, currency: _currency }: { runId: number; currency: string }) {
+  const qc = useQueryClient();
+  const { data: hauls = [] } = useQuery({
+    queryKey: ['salvage', runId],
+    queryFn: () => salvageApi.getForRun(runId),
+  });
+  const inv = () => {
+    qc.invalidateQueries({ queryKey: ['salvage', runId] });
+    qc.invalidateQueries({ queryKey: ['salvage-hauls'] });
+    qc.invalidateQueries({ queryKey: ['inventory'] });
+  };
+
+  const addHaul    = useMutation({ mutationFn: (d: unknown) => salvageApi.addHaul(d), onSuccess: inv });
+  const removeHaul = useMutation({ mutationFn: (id: number) => salvageApi.removeHaul(id), onSuccess: inv });
+  const commitHaul = useMutation({ mutationFn: ({ id, loc }: { id: number; loc: string }) => salvageApi.commitHaul(id, loc), onSuccess: inv });
+  const uncommit   = useMutation({ mutationFn: (id: number) => salvageApi.uncommitHaul(id), onSuccess: inv });
+  const addLine    = useMutation({ mutationFn: ({ haulId, d }: { haulId: number; d: unknown }) => salvageApi.addLine(haulId, d), onSuccess: inv });
+  const removeLine = useMutation({ mutationFn: (id: number) => salvageApi.removeLine(id), onSuccess: inv });
+
+  const [newLabel,    setNewLabel]    = useState('');
+  const [lineForm,    setLineForm]    = useState<Record<number, { material: string; scu: string }>>({});
+  const [commitLoc,   setCommitLoc]   = useState<Record<number, string>>({});
+  const [committing,  setCommitting]  = useState<Record<number, boolean>>({});
+  const [collapsed,   setCollapsed]   = useState<Record<number, boolean>>({});
+
+  const nextLabel = () => `Haul ${(hauls as any[]).length + 1}`;
+
+  return (
+    <div className="space-y-4">
+      {/* Add haul */}
+      <Card>
+        <CardHeader><CardTitle>Add Salvage Haul</CardTitle></CardHeader>
+        <div className="flex gap-2">
+          <input
+            className="flex-1"
+            placeholder={`e.g. "${nextLabel()}" or "Reclaimer run"`}
+            value={newLabel}
+            onChange={e => setNewLabel(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newLabel.trim()) {
+                addHaul.mutate({ runId, label: newLabel.trim() });
+                setNewLabel('');
+              }
+            }}
+          />
+          <Button size="sm" onClick={() => {
+            addHaul.mutate({ runId, label: newLabel.trim() || nextLabel() });
+            setNewLabel('');
+          }}><Plus size={13} /> Add Haul</Button>
+        </div>
+      </Card>
+
+      {/* Haul list */}
+      {(hauls as any[]).length === 0 && (
+        <p className="text-sm text-slate-500 text-center py-4">No hauls yet — add one above.</p>
+      )}
+
+      {(hauls as any[]).map((h: any) => {
+        const lf          = lineForm[h.id] ?? { material: '', scu: '' };
+        const isCollapsed = collapsed[h.id] ?? false;
+        const isCommitting = committing[h.id] ?? false;
+        const totalScu    = (h.lines || []).reduce((s: number, l: any) => s + (l.quantity_scu || 0), 0);
+
+        return (
+          <Card key={h.id} className={h.committed ? 'opacity-70' : ''}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-2">
+              <button
+                onClick={() => setCollapsed(f => ({ ...f, [h.id]: !isCollapsed }))}
+                className="flex items-center gap-2 flex-1 text-left min-w-0"
+              >
+                <ChevronRight size={13} className={`shrink-0 text-slate-500 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} />
+                <span className="font-semibold text-slate-200 text-sm truncate">{h.label}</span>
+                <span className="text-xs text-orange-400 shrink-0">{totalScu.toFixed(2)} SCU</span>
+                {h.committed && <span className="text-xs text-emerald-400 shrink-0">✓ checked in{h.committed_location ? ` @ ${h.committed_location}` : ''}</span>}
+              </button>
+              <div className="flex items-center gap-1 shrink-0 ml-2">
+                {h.committed ? (
+                  <Button size="sm" variant="secondary" onClick={() => uncommit.mutate(h.id)}>
+                    <RotateCcw size={11} /> Undo
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="secondary"
+                    onClick={() => setCommitting(f => ({ ...f, [h.id]: !isCommitting }))}>
+                    <CheckCircle size={11} /> {isCommitting ? 'Cancel' : 'Check In'}
+                  </Button>
+                )}
+                <Button variant="danger" size="sm" onClick={() => removeHaul.mutate(h.id)}>
+                  <Trash2 size={12} />
+                </Button>
+              </div>
+            </div>
+
+            {/* Check-in form */}
+            {isCommitting && (
+              <div className="flex gap-2 items-center mb-3 ml-5">
+                <input
+                  className="flex-1"
+                  placeholder="Station / location (optional)"
+                  value={commitLoc[h.id] || ''}
+                  onChange={e => setCommitLoc(f => ({ ...f, [h.id]: e.target.value }))}
+                />
+                <Button size="sm" onClick={() => {
+                  commitHaul.mutate({ id: h.id, loc: commitLoc[h.id] || '' });
+                  setCommitting(f => { const n = { ...f }; delete n[h.id]; return n; });
+                  setCommitLoc(f => { const n = { ...f }; delete n[h.id]; return n; });
+                }}><CheckCircle size={12} /> Confirm — add to inventory</Button>
+              </div>
+            )}
+
+            {!isCollapsed && (
+              <div className="ml-5">
+                {/* Existing lines */}
+                {(h.lines || []).length > 0 && (
+                  <Table className="mb-3">
+                    <thead>
+                      <tr>
+                        <Th>Material</Th>
+                        <Th className="text-right">SCU</Th>
+                        <Th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(h.lines || []).map((l: any) => (
+                        <Tr key={l.id}>
+                          <Td className="font-medium text-slate-200">{l.material}</Td>
+                          <Td className="text-right text-orange-300">{l.quantity_scu.toFixed(2)}</Td>
+                          <Td className="text-right">
+                            {!h.committed && (
+                              <button onClick={() => removeLine.mutate(l.id)}
+                                className="text-slate-600 hover:text-red-400">
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </Td>
+                        </Tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                )}
+
+                {/* Add line */}
+                {!h.committed && (
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <input
+                      list="salvage-materials"
+                      placeholder="Material (e.g. RMC)"
+                      className="flex-1 min-w-[130px]"
+                      value={lf.material}
+                      onChange={e => setLineForm(f => ({ ...f, [h.id]: { ...lf, material: e.target.value } }))}
+                    />
+                    <MathInput
+                      placeholder="SCU"
+                      className="w-20"
+                      value={lf.scu}
+                      onChange={e => setLineForm(f => ({ ...f, [h.id]: { ...lf, scu: e.target.value } }))}
+                    />
+                    <Button size="sm" onClick={() => {
+                      if (!lf.material || !lf.scu) return;
+                      addLine.mutate({ haulId: h.id, d: { runId, material: lf.material, quantityScu: Number(lf.scu) } });
+                      setLineForm(f => ({ ...f, [h.id]: { material: '', scu: '' } }));
+                    }}><Plus size={13} /> Add</Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* Datalist for common salvage materials */}
+      <datalist id="salvage-materials">
+        {['RMC', 'CDM', 'Construction Materials', 'Recycled Material Composite',
+          'Armor', 'Ship Components', 'Medical Supplies', 'Food Supplies',
+          'Electronics', 'Titanium', 'Aluminum', 'Iron', 'Gold', 'Copper'].map(m => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
 // ─── Main RunDetail page ──────────────────────────────────────────────────────
-const TABS = ['overview', 'mining', 'refining', 'trading', 'hauling', 'crafting', 'contracts', 'expenses', 'crew'] as const;
+const TABS = ['overview', 'mining', 'refining', 'salvage', 'trading', 'hauling', 'crafting', 'contracts', 'expenses', 'crew'] as const;
 type Tab = typeof TABS[number];
 
 export function RunDetail() {
@@ -2371,6 +2951,7 @@ export function RunDetail() {
           </div>
         )}
         {tab === 'mining' && <MiningPanel runId={runId} currency={currency} />}
+        {tab === 'salvage' && <SalvagePanel runId={runId} currency={currency} />}
         {tab === 'refining' && <RefiningPanel runId={runId} currency={currency} />}
         {tab === 'trading' && <TradingPanel runId={runId} currency={currency} />}
         {tab === 'hauling' && <HaulingPanel runId={runId} currency={currency} />}

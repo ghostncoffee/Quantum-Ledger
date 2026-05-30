@@ -19,21 +19,33 @@ router.get('/run/:runId', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { runId, commodity, quantityBought, buyPricePerUnit, buyLocation, sellLocation } = req.body;
-  if (!runId || !commodity || quantityBought == null || buyPricePerUnit == null) {
-    return res.status(400).json({ error: 'runId, commodity, quantityBought, buyPricePerUnit required' });
+  const { runId, commodity, quantityBought, boxQuantity, scuPerBox, buyPricePerUnit, buyLocation, sellLocation } = req.body;
+  if (!runId || !commodity || buyPricePerUnit == null) {
+    return res.status(400).json({ error: 'runId, commodity, buyPricePerUnit required' });
   }
+  // Derive total quantity: prefer box×scu calculation, fall back to raw quantityBought
+  const totalQty: number = (boxQuantity != null && scuPerBox != null)
+    ? Number(boxQuantity) * Number(scuPerBox)
+    : Number(quantityBought ?? 0);
+  if (!totalQty) return res.status(400).json({ error: 'Quantity required (either boxQuantity+scuPerBox or quantityBought)' });
   try {
-    const totalCost = quantityBought * buyPricePerUnit;
+    // Total cost = boxes × price_per_box (price is per box/container, not per SCU)
+    const totalCost = (boxQuantity != null ? Number(boxQuantity) : totalQty) * Number(buyPricePerUnit);
     const result = await db.run(
-      'INSERT INTO trading_entries (run_id, commodity, quantity_bought, buy_price_per_unit, total_cost, buy_location, sell_location) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [runId, commodity, quantityBought, buyPricePerUnit, totalCost, buyLocation ?? null, sellLocation ?? null]
+      `INSERT INTO trading_entries
+         (run_id, commodity, quantity_bought, box_quantity, scu_per_box, buy_price_per_unit, total_cost, buy_location, sell_location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [runId, commodity, totalQty, boxQuantity ?? null, scuPerBox ?? null,
+       buyPricePerUnit, totalCost, buyLocation ?? null, sellLocation ?? null]
     );
 
-    // Auto-track purchase in inventory
+    // Auto-track purchase in inventory — use per-SCU cost for inventory valuation
     const run = await db.get('SELECT game_id FROM runs WHERE id = ?', [runId]);
     if (run) {
-      await inventoryIn(run.game_id, commodity, quantityBought, runId, buyPricePerUnit, `Bought for trading: ${commodity}`);
+      const costPerScu = (boxQuantity != null && scuPerBox != null && Number(scuPerBox) > 0)
+        ? Number(buyPricePerUnit) / Number(scuPerBox)
+        : Number(buyPricePerUnit);
+      await inventoryIn(run.game_id, commodity, totalQty, runId, costPerScu, `Bought for trading: ${commodity}`);
     }
 
     res.status(201).json({ id: result.lastInsertRowid });
@@ -41,20 +53,32 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
-  const { commodity, quantityBought, buyPricePerUnit, buyLocation, sellLocation, status } = req.body;
-  const totalCost = (quantityBought != null && buyPricePerUnit != null) ? quantityBought * buyPricePerUnit : null;
+  const { commodity, quantityBought, boxQuantity, scuPerBox, buyPricePerUnit, buyLocation, sellLocation, status } = req.body;
+  // If box fields provided, recompute the total; otherwise use raw quantityBought if given
+  const totalQty = (boxQuantity != null && scuPerBox != null)
+    ? Number(boxQuantity) * Number(scuPerBox)
+    : (quantityBought ?? null);
+  // Cost = boxes × price_per_box (price is per box, not per SCU)
+  const effectiveBoxes = boxQuantity ?? (totalQty != null && scuPerBox != null ? Number(totalQty) / Number(scuPerBox) : null);
+  const totalCost = (buyPricePerUnit != null)
+    ? (effectiveBoxes != null ? Number(effectiveBoxes) * Number(buyPricePerUnit) : (totalQty != null ? Number(totalQty) * Number(buyPricePerUnit) : null))
+    : null;
   try {
     await db.run(`
       UPDATE trading_entries SET
         commodity = COALESCE(?, commodity),
         quantity_bought = COALESCE(?, quantity_bought),
+        box_quantity = COALESCE(?, box_quantity),
+        scu_per_box = COALESCE(?, scu_per_box),
         buy_price_per_unit = COALESCE(?, buy_price_per_unit),
         total_cost = COALESCE(?, total_cost),
         buy_location = COALESCE(?, buy_location),
         sell_location = COALESCE(?, sell_location),
         status = COALESCE(?, status)
       WHERE id = ?
-    `, [commodity ?? null, quantityBought ?? null, buyPricePerUnit ?? null, totalCost, buyLocation ?? null, sellLocation ?? null, status ?? null, req.params.id]);
+    `, [commodity ?? null, totalQty, boxQuantity ?? null, scuPerBox ?? null,
+        buyPricePerUnit ?? null, totalCost, buyLocation ?? null, sellLocation ?? null,
+        status ?? null, req.params.id]);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

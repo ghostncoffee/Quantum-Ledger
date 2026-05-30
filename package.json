@@ -1,14 +1,18 @@
 {
-  "name": "game-ledger-workspace",
+  "name": "star-citizen-ledger-workspace",
   "private": true,
-  "version": "0.1.1",
+  "version": "1.0.0",
   "scripts": {
     "dev:server": "node server/node_modules/tsx/dist/cli.mjs server/src/index.ts",
     "dev:client": "node client/node_modules/vite/bin/vite.js",
     "build:server": "pnpm --filter game-ledger-server build",
     "build:client": "pnpm --filter client build",
+    "icons": "node scripts/generate-icons.js",
     "build": "pnpm run build:server && pnpm run build:client",
-    "package": "pnpm run build && node scripts/prepare-electron.js && cd electron && npm install && npm run dist",
-    "package:dir": "pnpm run build && node scripts/prepare-electron.js && cd electron && npm install && npm run dist:dir"
+    "package": "pnpm run icons && pnpm run build && node scripts/prepare-electron.js && cd electron && npm install && npm run dist",
+    "package:dir": "pnpm run icons && pnpm run build && node scripts/prepare-electron.js && cd electron && npm install && npm run dist:dir"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

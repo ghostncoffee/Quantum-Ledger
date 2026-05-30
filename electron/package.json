@@ -1,11 +1,11 @@
 {
-  "name": "game-ledger",
-  "productName": "Game Ledger",
-  "version": "0.1.9",
-  "description": "Local game economy tracker for Star Citizen, EVE Online, and more",
+  "name": "star-citizen-ledger",
+  "productName": "Star Citizen Ledger",
+  "version": "1.0.0",
+  "description": "Track your Star Citizen economy — hauling, mining, trading, refining and crew payouts in one offline desktop app.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Axiomancer/SC-Inventory-App"
+    "url": "https://github.com/Axiomancer/star-citizen-ledger"
   },
   "author": "Axiomancer",
   "main": "main.js",
@@ -25,9 +25,9 @@
     "electron-builder": "26.8.1"
   },
   "build": {
-    "appId": "io.gameledger.app",
-    "productName": "Game Ledger",
-    "copyright": "Copyright © 2025",
+    "appId": "io.starcitizenleder.app",
+    "productName": "Star Citizen Ledger",
+    "copyright": "Copyright © 2025 Axiomancer",
     "directories": {
       "output": "../release",
       "buildResources": "build-assets"
@@ -51,6 +51,7 @@
       }
     ],
     "win": {
+      "icon": "build-assets/icon.png",
       "target": [
         { "target": "nsis",     "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
@@ -61,7 +62,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Game Ledger",
+      "shortcutName": "Star Citizen Ledger",
       "artifactName": "${productName}-${version}-Setup-${arch}.${ext}"
     },
     "portable": {

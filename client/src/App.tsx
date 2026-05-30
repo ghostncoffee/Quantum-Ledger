@@ -15,6 +15,7 @@ import { CrewDetail } from './pages/CrewDetail';
 import { Vehicles } from './pages/Vehicles';
 import { Locations } from './pages/Locations';
 import { Refining } from './pages/Refining';
+import { Salvaging } from './pages/Salvaging';
 import { Settings } from './pages/Settings';
 
 const queryClient = new QueryClient({
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="runs/:id" element={<RunDetail />} />
             <Route path="mining" element={<Mining />} />
             <Route path="refining" element={<Refining />} />
+            <Route path="salvaging" element={<Salvaging />} />
             <Route path="trading" element={<Trading />} />
             <Route path="crafting" element={<Crafting />} />
             <Route path="contracts" element={<Contracts />} />

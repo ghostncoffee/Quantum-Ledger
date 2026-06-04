@@ -2722,8 +2722,8 @@ function SalvagePanel({ runId, currency: _currency }: { runId: number; currency:
 
       {/* Datalist for common salvage materials */}
       <datalist id="salvage-materials">
-        {['RMC', 'CDM', 'Construction Materials', 'Recycled Material Composite',
-          'Armor', 'Ship Components', 'Medical Supplies', 'Food Supplies',
+        {['Construction Pieces', 'Construction Materials', 'RMC', 'Recycled Material Composite',
+          'CDM', 'Armor', 'Ship Components', 'Medical Supplies', 'Food Supplies',
           'Electronics', 'Titanium', 'Aluminum', 'Iron', 'Gold', 'Copper'].map(m => (
           <option key={m} value={m} />
         ))}

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { routeError } from '../lib/routeError';
 import { db } from '../db';
-import { inventoryIn } from '../lib/inventory';
+import { inventoryIn, inventoryOut } from '../lib/inventory';
 
 const router = Router();
 
@@ -257,6 +257,31 @@ router.post('/refining/sessions', async (req, res) => {
       );
     }
 
+    // Deduct inventory-sourced inputs (e.g. salvaged Construction Materials refined
+    // from your stockpile). Mining ore lives in bags (removed below); salvage/inventory
+    // material is already stocked, so pulling it into a refinery job must remove it now.
+    const invLines = (lines as any[]).filter(
+      (l: any) => l.fromInventory && l.inputMaterial && Number(l.inputQuantity) > 0
+    );
+    if (invLines.length > 0) {
+      let dedGameId: number | null = gameId ?? null;
+      if (!dedGameId) {
+        const g = await db.get('SELECT id FROM games ORDER BY id LIMIT 1');
+        dedGameId = g?.id ?? null;
+      }
+      if (dedGameId) {
+        for (const l of invLines) {
+          await inventoryOut(
+            dedGameId,
+            l.inputMaterial,
+            Number(l.inputQuantity),
+            null,
+            `Refining input: ${l.inputMaterial}`,
+          );
+        }
+      }
+    }
+
     // Remove consumed ore lines from mining bags
     const allOreLineIds: number[] = lines.flatMap((l: any) =>
       Array.isArray(l.oreLineIds) ? l.oreLineIds : []
@@ -349,18 +374,22 @@ router.delete('/refining/sessions/:id', async (req, res) => {
   } catch (e: unknown) { routeError(res, e); }
 });
 
-// Update individual line's actual output when completing a session
+// Update an individual line — input/output/material editable any time.
+// status is only changed when explicitly passed (e.g. 'done' from the
+// complete flow); plain edits must NOT silently mark the line done.
 router.put('/refining/sessions/:sid/lines/:lid', async (req, res) => {
-  const { outputQuantity, outputMaterial, efficiency } = req.body;
+  const { inputQuantity, outputQuantity, outputMaterial, efficiency, status } = req.body;
   try {
     await db.run(`
       UPDATE refining_jobs SET
+        input_quantity  = COALESCE(?, input_quantity),
         output_quantity = COALESCE(?, output_quantity),
         output_material = COALESCE(?, output_material),
         efficiency      = COALESCE(?, efficiency),
-        status          = 'done'
+        status          = COALESCE(?, status)
       WHERE id = ? AND session_id = ?
-    `, [outputQuantity ?? null, outputMaterial ?? null, efficiency ?? null,
+    `, [inputQuantity ?? null, outputQuantity ?? null, outputMaterial ?? null,
+        efficiency ?? null, status ?? null,
         req.params.lid, req.params.sid]);
     res.json({ ok: true });
   } catch (e: unknown) { routeError(res, e); }

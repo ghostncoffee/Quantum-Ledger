@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { miningApi, refinerySessionsApi, salesApi } from '@/lib/api';
+import { miningApi, refinerySessionsApi, salesApi, inventoryApi } from '@/lib/api';
 import { mergeOreNames } from '@/lib/ores';
 import { MathInput } from '@/components/ui/MathInput';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -22,6 +22,8 @@ type LineForm = {
   outputMaterial: string;
   expectedScu: string;
   oreLineIds: number[]; // mining_ore_lines IDs to remove when session is submitted
+  fromInventory?: boolean; // true when the input is pulled from inventory (e.g. salvaged Construction Materials)
+  gameId?: number;         // game the inventory material belongs to (for stock deduction)
 };
 
 type JobBuilderState = {
@@ -75,10 +77,15 @@ export function Refining() {
     queryKey: ['refinery-sessions'],
     queryFn:  () => refinerySessionsApi.list(),
   });
+  const { data: inventoryItems = [] } = useQuery({
+    queryKey: ['inventory'],
+    queryFn:  () => inventoryApi.list(),
+  });
 
   const inv = () => {
     qc.invalidateQueries({ queryKey: ['refinery-sessions'] });
     qc.invalidateQueries({ queryKey: ['committed-bags'] });
+    qc.invalidateQueries({ queryKey: ['inventory'] });
   };
   const invSale = () => { inv(); qc.invalidateQueries({ queryKey: ['inventory'] }); };
 
@@ -120,6 +127,25 @@ export function Refining() {
     }));
   };
 
+  // Add an inventory-held material (e.g. salvaged RMC) as a refining input
+  const addInventoryToBuilder = (item: any) => {
+    setBuilderOpen(true);
+    setJobForm(f => ({
+      ...f,
+      lines: [...f.lines, {
+        key: newKey(),
+        material: item.item,
+        quality: '—',
+        inputScu: item.quantity != null ? String(item.quantity) : '',
+        outputMaterial: '',
+        expectedScu: '',
+        oreLineIds: [],
+        fromInventory: true,
+        gameId: item.game_id,
+      }],
+    }));
+  };
+
   const setLine = (key: string, patch: Partial<LineForm>) =>
     setJobForm(f => ({ ...f, lines: f.lines.map(l => l.key === key ? { ...l, ...patch } : l) }));
 
@@ -129,11 +155,14 @@ export function Refining() {
   const submitJob = () => {
     if (!jobForm.lines.length) return;
     const durationMins = jobForm.durationHrs ? Math.round(Number(jobForm.durationHrs) * 60) : undefined;
-    // Derive game_id from the station's bags, falling back to first committed bag
+    // Derive game_id from the station's bags, the first committed bag, or an
+    // inventory-sourced line (salvage refining has no bag to trace through)
     const stationEntry = jobForm.station ? stationData[jobForm.station] : undefined;
+    const invLine = jobForm.lines.find(l => l.fromInventory && l.gameId != null);
     const gameId: number | undefined =
       (stationEntry?.bags[0] as any)?.game_id ??
       (committedBags as any[])[0]?.game_id ??
+      invLine?.gameId ??
       undefined;
     createSession.mutate({
       gameId,
@@ -142,11 +171,13 @@ export function Refining() {
       totalCost:       Number(jobForm.totalCost) || 0,
       durationMinutes: durationMins,
       lines: jobForm.lines.map(l => ({
-        bagId:             stationEntry?.anchorBagId,   // anchor bag so game_id is traceable
+        bagId:             l.fromInventory ? undefined : stationEntry?.anchorBagId,
         inputQuantity:     Number(l.inputScu),
         outputMaterial:    l.outputMaterial || l.material,
         expectedOutputQty: l.expectedScu ? Number(l.expectedScu) : undefined,
         oreLineIds:        l.oreLineIds.length > 0 ? l.oreLineIds : undefined,
+        fromInventory:     l.fromInventory || undefined,
+        inputMaterial:     l.fromInventory ? l.material : undefined,
       })),
     });
     setJobForm(EMPTY_JOB);
@@ -155,11 +186,13 @@ export function Refining() {
 
   // ── Session interaction state ────────────────────────────────────────────────
   const [activeOpen,   setActiveOpen]   = useState(true);
+  const [invCardOpen,  setInvCardOpen]  = useState(true);
   const [doneOpen,     setDoneOpen]     = useState(false);
   const [linesOpen,    setLinesOpen]    = useState<Record<number, boolean>>({});
   const [completing,   setCompleting]   = useState<Record<number, boolean>>({});
   const [actualOut,    setActualOut]    = useState<Record<number, Record<number, string>>>({}); // [sid][lid]
   const [editingSess,  setEditingSess]  = useState<Record<number, any>>({});
+  const [editingLn,    setEditingLn]    = useState<Record<number, { output_material: string; input_quantity: string; output_quantity: string } | null>>({});
   const [quickSaleLn,  setQuickSaleLn]  = useState<Record<number, { commodity: string; qty: string; price: string; location: string } | null>>({});
 
   // ── Derived: committed bags → station → material → quality bands ─────────────
@@ -346,6 +379,7 @@ export function Refining() {
               <tbody>
                 {lines.map((line: any) => {
                   const qs = quickSaleLn[line.id];
+                  const el = editingLn[line.id];
                   return (
                     <>
                       <tr key={line.id} className="border-t border-slate-800">
@@ -366,8 +400,24 @@ export function Refining() {
                               }))}
                             />
                           ) : (
-                            <span className={line.output_quantity != null ? 'text-emerald-400' : 'text-slate-600'}>
-                              {line.output_quantity != null ? `${line.output_quantity} SCU` : '—'}
+                            <span className="inline-flex items-center gap-1.5 justify-end">
+                              <span className={line.output_quantity != null ? 'text-emerald-400' : 'text-slate-600'}>
+                                {line.output_quantity != null ? `${line.output_quantity} SCU` : '—'}
+                              </span>
+                              <button
+                                title="Edit line"
+                                className="text-slate-600 hover:text-slate-300"
+                                onClick={() => setEditingLn(f => ({
+                                  ...f,
+                                  [line.id]: {
+                                    output_material: line.output_material || '',
+                                    input_quantity:  line.input_quantity != null ? String(line.input_quantity) : '',
+                                    output_quantity: line.output_quantity != null ? String(line.output_quantity) : '',
+                                  },
+                                }))}
+                              >
+                                <Pencil size={10} />
+                              </button>
                             </span>
                           )}
                         </td>
@@ -388,6 +438,41 @@ export function Refining() {
                           </td>
                         )}
                       </tr>
+                      {/* Inline line editor */}
+                      {el && (
+                        <tr key={`edit-${line.id}`}>
+                          <td colSpan={isDone ? 5 : 4} className="pb-2 pt-1">
+                            <div className="flex gap-2 flex-wrap items-end p-2 bg-slate-800/50 rounded-lg border border-slate-700/40">
+                              <div className="flex-1 min-w-[140px]">
+                                <p className="text-xs text-slate-500 mb-0.5">Output material</p>
+                                <input value={el.output_material}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, output_material: e.target.value } }))} />
+                              </div>
+                              <div className="w-24">
+                                <p className="text-xs text-slate-500 mb-0.5">In SCU</p>
+                                <MathInput value={el.input_quantity}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, input_quantity: e.target.value } }))} />
+                              </div>
+                              <div className="w-24">
+                                <p className="text-xs text-slate-500 mb-0.5">{isDone ? 'Actual out' : 'Expected out'} SCU</p>
+                                <MathInput value={el.output_quantity}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, output_quantity: e.target.value } }))} />
+                              </div>
+                              <div className="flex gap-1.5 pb-0.5">
+                                <Button size="sm" onClick={() => {
+                                  updateLine.mutate({ sid: s.id, lid: line.id, d: {
+                                    outputMaterial: el.output_material || undefined,
+                                    inputQuantity:  el.input_quantity  !== '' ? Number(el.input_quantity)  : undefined,
+                                    outputQuantity: el.output_quantity !== '' ? Number(el.output_quantity) : undefined,
+                                  }});
+                                  setEditingLn(f => ({ ...f, [line.id]: null }));
+                                }}><CheckCircle size={12} /> Save</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setEditingLn(f => ({ ...f, [line.id]: null }))}>✕</Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       {/* Quick sale for this line */}
                       {qs && (
                         <tr key={`qs-${line.id}`}>
@@ -440,6 +525,7 @@ export function Refining() {
                     const val = outputs[line.id];
                     return updateLine.mutateAsync({ sid: s.id, lid: line.id, d: {
                       outputQuantity: val ? Number(val) : undefined,
+                      status: 'done',
                     }});
                   })).then(() => {
                     updateSession.mutate({ id: s.id, d: { status: 'done' } });
@@ -687,6 +773,42 @@ export function Refining() {
         </Card>
       )}
 
+      {/* ── Refine from Inventory (salvaged RMC, held materials) ── */}
+      {(() => {
+        const refinable = (inventoryItems as any[]).filter((i: any) => (i.quantity ?? 0) > 0);
+        if (refinable.length === 0) return null;
+        return (
+          <Card>
+            <button className="flex items-center gap-2 w-full text-left" onClick={() => setInvCardOpen(v => !v)}>
+              <ChevronRight size={13} className={`text-slate-500 transition-transform ${invCardOpen ? 'rotate-90' : ''}`} />
+              <CardTitle>Refine from Inventory</CardTitle>
+              <span className="text-xs text-slate-500">{refinable.length} material{refinable.length !== 1 ? 's' : ''} on hand</span>
+            </button>
+            {invCardOpen && (
+              <>
+                <p className="text-xs text-slate-600 mt-2 mb-2">
+                  Salvaged Construction Materials and anything else you hold. Starting a job removes the input from inventory; the refined output is added back when you mark it done.
+                </p>
+                <div className="divide-y divide-slate-700/40">
+                  {refinable.map((item: any) => (
+                    <div key={item.id} className="py-2 flex items-center gap-3">
+                      <span className="font-semibold text-slate-200 text-sm flex-1 truncate">{item.item}</span>
+                      <span className="text-xs text-orange-400 font-semibold">{Number(item.quantity).toFixed(2)} SCU</span>
+                      {item.unit_cost != null && (
+                        <span className="text-xs text-slate-600 hidden sm:inline">@ {fmtCurrency(item.unit_cost, currency)}/SCU</span>
+                      )}
+                      <Button size="sm" variant="secondary" onClick={() => addInventoryToBuilder(item)}>
+                        <FlaskConical size={11} /> Refine
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </Card>
+        );
+      })()}
+
       {/* ── Active sessions ── */}
       {activeSess.length > 0 && (
         <Card>
@@ -722,11 +844,12 @@ export function Refining() {
         </Card>
       )}
 
-      {sessions.length === 0 && Object.keys(stationData).length === 0 && (
+      {sessions.length === 0 && Object.keys(stationData).length === 0 &&
+       (inventoryItems as any[]).filter((i: any) => (i.quantity ?? 0) > 0).length === 0 && (
         <div className="text-center py-12">
           <p className="text-slate-400 font-medium">No refining activity yet</p>
           <p className="text-sm text-slate-600 mt-1">
-            Check in mining bags from a run's Mining tab, then create a refinery job above.
+            Check in mining bags from a run's Mining tab, or commit a salvage haul, then create a refinery job above.
           </p>
         </div>
       )}

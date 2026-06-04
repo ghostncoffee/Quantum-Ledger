@@ -128,6 +128,9 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    // inventory_transactions FK-references inventory(id) with no cascade, so the
+    // row's history must be cleared first or the delete fails the FK constraint.
+    await db.run('DELETE FROM inventory_transactions WHERE inventory_id = ?', [req.params.id]);
     await db.run('DELETE FROM inventory WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (e: unknown) { routeError(res, e); }

@@ -1,7 +1,7 @@
 {
   "name": "star-citizen-ledger",
   "productName": "Star Citizen Ledger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Track your Star Citizen economy — hauling, mining, trading, refining and crew payouts in one offline desktop app.",
   "repository": {
     "type": "git",

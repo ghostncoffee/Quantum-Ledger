@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { routeError } from '../lib/routeError';
 import { db } from '../db';
-import { inventoryIn } from '../lib/inventory';
+import { inventoryIn, inventoryOut } from '../lib/inventory';
 
 const router = Router();
 
@@ -83,6 +83,16 @@ router.post('/hauls/:id/commit', async (req, res) => {
     );
     if (!haul) return res.status(404).json({ error: 'Haul not found' });
 
+    // Idempotent: if already committed, only update the location — never re-stock.
+    // (Re-stocking on every commit was double/triple-counting inventory.)
+    if (haul.committed) {
+      await db.run(
+        'UPDATE salvage_hauls SET committed_location = ?, committed_at = ? WHERE id = ?',
+        [location ?? null, new Date().toISOString(), req.params.id],
+      );
+      return res.json({ ok: true });
+    }
+
     const lines = await db.all(
       'SELECT * FROM salvage_lines WHERE haul_id = ?',
       [req.params.id],
@@ -110,9 +120,29 @@ router.post('/hauls/:id/commit', async (req, res) => {
   } catch (e: unknown) { routeError(res, e); }
 });
 
-// Uncommit — does NOT reverse inventory (user manages that manually)
+// Uncommit — reverses the inventory that was stocked at commit time, so a
+// commit → edit → re-commit cycle nets to zero instead of accumulating.
 router.delete('/hauls/:id/commit', async (req, res) => {
   try {
+    const haul = await db.get(
+      `SELECT sh.committed, sh.run_id, r.game_id FROM salvage_hauls sh
+       JOIN runs r ON sh.run_id = r.id WHERE sh.id = ?`,
+      [req.params.id],
+    );
+    if (haul && haul.committed) {
+      const lines = await db.all('SELECT * FROM salvage_lines WHERE haul_id = ?', [req.params.id]);
+      for (const line of lines as any[]) {
+        if ((line.quantity_scu ?? 0) > 0) {
+          await inventoryOut(
+            haul.game_id,
+            line.material,
+            line.quantity_scu,
+            haul.run_id,
+            `Salvage uncommitted: ${line.material}`,
+          );
+        }
+      }
+    }
     await db.run(
       `UPDATE salvage_hauls
          SET committed = 0, committed_location = NULL, committed_at = NULL
@@ -124,6 +154,18 @@ router.delete('/hauls/:id/commit', async (req, res) => {
 });
 
 // ─── Salvage lines ────────────────────────────────────────────────────────────
+// Helper: fetch a line's parent haul commit state + game/run for inventory sync
+async function lineContext(lineId: string | number) {
+  return db.get(
+    `SELECT sl.material, sl.quantity_scu, sh.committed, sh.run_id, r.game_id
+       FROM salvage_lines sl
+       JOIN salvage_hauls sh ON sl.haul_id = sh.id
+       JOIN runs r ON sh.run_id = r.id
+      WHERE sl.id = ?`,
+    [lineId],
+  );
+}
+
 router.post('/hauls/:haulId/lines', async (req, res) => {
   const { runId, material, quantityScu } = req.body;
   if (!runId || !material || quantityScu == null) {
@@ -134,6 +176,15 @@ router.post('/hauls/:haulId/lines', async (req, res) => {
       'INSERT INTO salvage_lines (haul_id, run_id, material, quantity_scu) VALUES (?, ?, ?, ?)',
       [req.params.haulId, runId, material, quantityScu],
     );
+    // If the haul is already committed, stock this new line immediately
+    const haul = await db.get(
+      `SELECT sh.committed, r.game_id FROM salvage_hauls sh
+       JOIN runs r ON sh.run_id = r.id WHERE sh.id = ?`,
+      [req.params.haulId],
+    );
+    if (haul && haul.committed && Number(quantityScu) > 0) {
+      await inventoryIn(haul.game_id, material, Number(quantityScu), runId, null, `Salvaged: ${material}`);
+    }
     res.status(201).json({ id: r.lastInsertRowid });
   } catch (e: unknown) { routeError(res, e); }
 });
@@ -141,6 +192,14 @@ router.post('/hauls/:haulId/lines', async (req, res) => {
 router.put('/lines/:id', async (req, res) => {
   const { material, quantityScu } = req.body;
   try {
+    // If the parent haul is committed, reconcile inventory: back out the old
+    // (material, qty) and apply the new one, so edits don't accumulate stock.
+    const before = await lineContext(req.params.id);
+    if (before && before.committed && (before.quantity_scu ?? 0) > 0) {
+      await inventoryOut(before.game_id, before.material, before.quantity_scu, before.run_id,
+        `Salvage line edited: ${before.material}`);
+    }
+
     await db.run(
       `UPDATE salvage_lines SET
          material     = COALESCE(?, material),
@@ -148,12 +207,24 @@ router.put('/lines/:id', async (req, res) => {
        WHERE id = ?`,
       [material ?? null, quantityScu ?? null, req.params.id],
     );
+
+    const after = await lineContext(req.params.id);
+    if (after && after.committed && (after.quantity_scu ?? 0) > 0) {
+      await inventoryIn(after.game_id, after.material, after.quantity_scu, after.run_id, null,
+        `Salvaged: ${after.material}`);
+    }
     res.json({ ok: true });
   } catch (e: unknown) { routeError(res, e); }
 });
 
 router.delete('/lines/:id', async (req, res) => {
   try {
+    // Back the line out of inventory if its haul was committed
+    const ctx = await lineContext(req.params.id);
+    if (ctx && ctx.committed && (ctx.quantity_scu ?? 0) > 0) {
+      await inventoryOut(ctx.game_id, ctx.material, ctx.quantity_scu, ctx.run_id,
+        `Salvage line removed: ${ctx.material}`);
+    }
     await db.run('DELETE FROM salvage_lines WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (e: unknown) { routeError(res, e); }

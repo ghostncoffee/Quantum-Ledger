@@ -90,6 +90,12 @@ jobs:
     needs: [build-desktop, build-clan-server]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from package.json
+        id: pkg
+        run: echo "version=$(node -p "require('./quantum-ledger/electron/package.json').version")" >> $GITHUB_OUTPUT
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -99,7 +105,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Latest build
+          name: "Quantum Ledger v${{ steps.pkg.outputs.version }}"
           prerelease: true
           make_latest: false
           body: |

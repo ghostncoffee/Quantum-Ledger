@@ -1,0 +1,113 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Desktop app (Electron, Windows) ────────────────────────────────────────
+  build-desktop:
+    name: Desktop app (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: quantum-ledger
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install root deps
+        run: npm install --ignore-scripts
+
+      - name: Install client deps
+        working-directory: quantum-ledger/client
+        run: npm install --ignore-scripts
+
+      - name: Install server deps
+        working-directory: quantum-ledger/server
+        run: npm install --ignore-scripts
+
+      - name: Generate icons
+        run: npm run icons
+
+      - name: Build server + client
+        run: npm run build
+
+      - name: Prepare electron bundle
+        run: node scripts/prepare-electron.js
+
+      - name: Install electron deps
+        working-directory: quantum-ledger/electron
+        run: npm install --ignore-scripts
+
+      - name: Build Windows installers
+        working-directory: quantum-ledger/electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: quantum-ledger/release/**/*.exe
+          if-no-files-found: error
+
+  # ── Clan data server (pkg → single .exe) ───────────────────────────────────
+  build-clan-server:
+    name: Clan data server (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clan-data-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        run: npm install
+
+      - name: Build exe
+        run: npm run package:exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clan-data-server
+          path: clan-data-server/pkg-dist/clan-data-server.exe
+          if-no-files-found: error
+
+  # ── Publish both to a rolling "latest" pre-release ─────────────────────────
+  publish:
+    name: Publish latest release
+    needs: [build-desktop, build-clan-server]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Update latest pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          prerelease: true
+          make_latest: false
+          body: |
+            Automated build from the latest commit on `main` — ${{ github.sha }}
+
+            | File | What it is |
+            |---|---|
+            | `Quantum Ledger-*-Setup-x64.exe` | Desktop app — Windows installer |
+            | `Quantum Ledger-*-Portable-x64.exe` | Desktop app — portable, no install needed |
+            | `clan-data-server.exe` | Clan data server — self-contained, run beside `.env` |
+          files: dist/**/*

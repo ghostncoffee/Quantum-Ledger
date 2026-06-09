@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clan Data Server — Dashboard</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="auth-gate">
+    <h1>Clan Data Server</h1>
+    <p class="empty">Enter the server's auth token to view the dashboard.</p>
+    <input type="password" id="token-input" placeholder="Auth token" autocomplete="off" />
+    <div><button id="token-save">Connect</button></div>
+    <div id="auth-status"></div>
+  </div>
+
+  <div id="dashboard" hidden>
+    <header>
+      <h1 id="clan-title">Clan Data Server</h1>
+      <div id="server-info"></div>
+    </header>
+
+    <nav class="tab-bar">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="activity">Activity</button>
+      <button class="tab" data-tab="members">
+        Members
+        <span class="tab-badge" id="pending-badge" hidden></span>
+      </button>
+      <button class="tab" data-tab="ships">Ships</button>
+      <button class="tab" data-tab="blueprints">Blueprints</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+      <!-- Overview -->
+      <section class="panel tab-content active" id="tab-overview">
+        <h2>Overview <span class="pill">last 7 days</span></h2>
+        <div class="stats-row" id="stats-row"></div>
+
+        <h2 style="margin-top:20px">Leaderboard <span class="pill">sessions this week</span></h2>
+        <table id="leaderboard-table">
+          <thead><tr><th>#</th><th>Member</th><th>Sessions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="leaderboard-empty" hidden>No sessions logged yet.</div>
+      </section>
+
+      <!-- Activity -->
+      <section class="panel tab-content" id="tab-activity">
+        <h2>Incoming activity</h2>
+        <table id="activity-table">
+          <thead><tr><th>Time</th><th>Member</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="activity-empty" hidden>No activity yet — once the offline tool starts syncing, uploads will show up here.</div>
+      </section>
+
+      <!-- Members -->
+      <section class="panel tab-content" id="tab-members">
+        <!-- Pending approvals -->
+        <div id="pending-section" hidden>
+          <h2>Pending Approvals</h2>
+          <table id="pending-table">
+            <thead><tr><th>Username</th><th>First seen</th><th>Last seen</th><th>Actions</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="section-divider"></div>
+        </div>
+
+        <h2>Approved Members</h2>
+        <table id="members-table">
+          <thead><tr><th>Username</th><th>Sessions</th><th>Ships</th><th>First seen</th><th>Last seen</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="members-empty" hidden>No approved members yet.</div>
+      </section>
+
+      <!-- Ships -->
+      <section class="panel tab-content" id="tab-ships">
+        <h2>Clan Hangar</h2>
+        <table id="ships-table">
+          <thead><tr><th>Ship</th><th>Type</th><th>SCU</th><th>Count</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="ships-empty" hidden>No ships synced yet. Members need to sync their hangar from the offline tool.</div>
+      </section>
+
+      <!-- Blueprints -->
+      <section class="panel tab-content" id="tab-blueprints">
+        <h2>Clan Blueprints</h2>
+        <table id="blueprints-table">
+          <thead><tr><th>Blueprint</th><th>Owners</th><th>Members</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="blueprints-empty" hidden>No blueprints synced yet.</div>
+      </section>
+
+      <!-- Settings -->
+      <section class="panel tab-content" id="tab-settings">
+        <h2>Server Settings</h2>
+        <form id="settings-form" class="settings-form">
+          <div class="form-group">
+            <label for="setting-clan-name">Clan Name</label>
+            <input type="text" id="setting-clan-name" placeholder="My Clan" maxlength="64" />
+          </div>
+          <div class="form-actions">
+            <button type="submit">Save</button>
+            <span id="settings-saved" hidden class="ok-text">Saved!</span>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+<script src="/app.js"></script>
+</body>
+</html>

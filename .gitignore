@@ -1,20 +1,20 @@
 # Dependencies
 node_modules/
 .pnpm-store/
-electron/node_modules/
+quantum-ledger/electron/node_modules/
 
 # Build outputs
-server/dist/
-client/dist/
-electron/server-dist/
-release/
+quantum-ledger/server/dist/
+quantum-ledger/client/dist/
+quantum-ledger/electron/server-dist/
+quantum-ledger/release/
 
-# Claude local settings
-.claude/settings.local.json
+# Claude Code settings (local only)
+.claude/
 
 # Database & user data (never commit)
-server/data/
-electron/data/
+quantum-ledger/server/data/
+quantum-ledger/electron/data/
 *.db
 *.db-shm
 *.db-wal
@@ -36,4 +36,6 @@ Thumbs.db
 .idea/
 
 # Vite cache
-client/.vite/
+quantum-ledger/client/.vite/
+watcher.py
+shiplist (2).json

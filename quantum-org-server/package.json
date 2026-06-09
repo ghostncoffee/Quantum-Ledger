@@ -1,6 +1,6 @@
 {
-  "name": "clan-data-server",
-  "version": "0.1.0",
+  "name": "quantum-org-server",
+  "version": "1.0.2",
   "private": true,
   "type": "commonjs",
   "scripts": {

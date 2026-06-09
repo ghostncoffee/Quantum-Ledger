@@ -1,46 +1,82 @@
-# Clan Data Server
+# Quantum Org Server
 
-A small, self-hostable Express + SQLite server that clan leaders run so members of the Quantum Ledger desktop app can optionally sync their activity to a shared, central place.
+A small, self-hostable Express + SQLite server that org leaders run so members of the Quantum Ledger desktop app can optionally sync their activity to a shared, central place.
 
 ---
 
 ## Features
 
 - **Activity feed** — real-time log of every uploaded session (mining, hauling, salvage, contract, refining)
-- **Blueprint index** — clan-wide catalogue of who has discovered which blueprints
+- **Blueprint index** — org-wide catalogue of who has discovered which blueprints
 - **Hangar overview** — aggregated fleet view showing every ship type across all approved members
 - **Leaderboards** — ranked by sessions, payout, or activity within a configurable time window
-- **Clan statistics** — active members, session counts, and earnings summaries by week/month/all-time
+- **Org statistics** — active members, session counts, and earnings summaries by week/month/all-time
 - **Member approval system** — new members start as `pending`; an admin must approve them before their data appears in stats
 - **Admin dashboard** — browser-based panel (served at `/`) for managing members, reviewing ships and blueprints, and changing settings
-- **Clan name** — configurable server display name shown in the dashboard header and browser title
+- **Org name** — configurable display name shown in the dashboard header and browser title
 
 ---
 
-## Setup
+## Deployment
 
-### Development
+### Option A — Docker (recommended for VPS / Linux)
+
+Pre-built images are published to the GitHub Container Registry on every push to `main`.
+
+**Quick start with Docker Compose:**
+
+```bash
+# 1. Download the compose file
+curl -O https://raw.githubusercontent.com/ghostncoffee/quantum-ledger/main/quantum-org-server/docker-compose.yml
+
+# 2. Create your .env (values are auto-generated on first run if absent)
+touch .env
+
+# 3. Start
+docker compose up -d
+```
+
+The server is now running on port `3100`. Visit `http://<your-server>:3100/` to open the admin dashboard.
+
+**Data persistence:** the SQLite database is stored in `./data/` on the host, mounted into the container. It survives container restarts and image updates.
+
+**Updating to the latest image:**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+> For production, put the server behind a reverse proxy (nginx, Caddy) to terminate TLS. Never expose port 3100 directly to the internet without TLS.
+
+---
+
+### Option B — Windows .exe (no Docker / no Node.js required)
+
+Download `quantum-org-server.exe` from the [latest release](https://github.com/ghostncoffee/quantum-ledger/releases/tag/latest) and run it. On first launch it auto-generates `.env` and `data/` beside the executable — no runtime install needed.
+
+```
+quantum-org-server.exe
+.env            ← auto-generated on first run (SERVER_ID / AUTH_TOKEN)
+data/
+  quantum-org-server.db
+```
+
+---
+
+### Option C — Development / manual Node.js
 
 ```bash
 npm install
 npm run dev
 ```
 
-On first run the server auto-generates `SERVER_ID` (a UUID) and `AUTH_TOKEN` (a 32-byte hex string) and writes them to `.env`. Share the server URL, Server ID, and Auth Token with clan members so they can configure the offline tool to sync.
+On first run the server auto-generates `SERVER_ID` (a UUID) and `AUTH_TOKEN` (a 32-byte hex string) and writes them to `.env`. Share the server URL, Server ID, and Auth Token with org members so they can configure the desktop app to sync.
 
-### Packaging to a Windows .exe
+To compile and run in production mode:
 
 ```bash
-npm run package:exe
-```
-
-This compiles TypeScript then uses [`@yao-pkg/pkg`](https://github.com/yao-pkg/pkg) to produce a single self-contained `pkg-dist/clan-data-server.exe` (~80 MB, bundles a full Node.js runtime). On first launch it generates its own `.env` and `data/` folder beside the executable — no Node.js install required on the target machine.
-
-```
-clan-data-server.exe
-.env            ← auto-generated on first run (SERVER_ID / AUTH_TOKEN)
-data/
-  clan-data-server.db
+npm run build
+npm start
 ```
 
 ---
@@ -53,16 +89,16 @@ Visit the server's root URL in a browser (e.g. `http://localhost:3100/`) to open
 
 | Tab | Contents |
 |---|---|
-| **Overview** | Clan stats (last 7 days) + top-sessions leaderboard |
+| **Overview** | Org stats (last 7 days) + top-sessions leaderboard |
 | **Activity** | Incoming activity feed (last 50 entries) |
 | **Members** | Pending approvals section (if any) + approved member list |
-| **Ships** | Aggregated clan hangar — one row per unique ship model with occurrence count |
+| **Ships** | Aggregated org hangar — one row per unique ship model with occurrence count |
 | **Blueprints** | Blueprint catalogue with owner count and member list |
-| **Settings** | Clan name configuration |
+| **Settings** | Org name configuration |
 
 ### Member approval
 
-When a member connects the desktop app for the first time their account is created with status `pending`. Their sessions and data are stored but excluded from stats, leaderboards, and the clan blueprint/hangar views until an admin approves them. The **Members** tab shows a **Pending Approvals** section (with a badge count on the tab) whenever unapproved members exist. Approve or reject with the buttons in that section.
+When a member connects the desktop app for the first time their account is created with status `pending`. Their sessions and data are stored but excluded from stats, leaderboards, and the org blueprint/hangar views until an admin approves them. The **Members** tab shows a **Pending Approvals** section (with a badge count on the tab) whenever unapproved members exist. Approve or reject with the buttons in that section.
 
 ### Polling cadence
 
@@ -70,14 +106,14 @@ The dashboard uses two independent polling intervals to keep API traffic low:
 
 | Tier | Interval | What it refreshes |
 |---|---|---|
-| Fast | 60 s | Health, clan stats, activity feed |
+| Fast | 60 s | Health, org stats, activity feed |
 | Slow | 5 min | Members, ships, blueprints, leaderboard |
 
 ---
 
 ## Configuration
 
-Copy `.env.example` to `.env` and edit as needed. Most values are auto-generated and do not need to be changed manually.
+Copy `.env.example` to `.env` and edit as needed. Most values are auto-generated on first run and do not need to be changed manually.
 
 ```bash
 SERVER_PORT=3100          # Port to listen on (default 3100)
@@ -110,18 +146,18 @@ All routes except `GET /api/health` require `Authorization: Bearer <AUTH_TOKEN>`
 | `/api/members` | `status=approved\|pending\|all`, `limit`, `offset` | Member list with session and ship counts |
 | `/api/members/ships` | — | Aggregated fleet — one row per ship model with count |
 | `/api/members/:username` | — | Individual member detail |
-| `/api/stats/clan` | `period=today\|week\|month\|all_time` | Clan-wide activity summary |
+| `/api/stats/clan` | `period=today\|week\|month\|all_time` | Org-wide activity summary |
 | `/api/stats/activity/recent` | `limit` | Recent activity log entries |
 | `/api/blueprints` | — | Blueprint catalogue with per-blueprint member list |
 | `/api/leaderboard/sessions` | `period`, `limit` | Top members by session count |
 | `/api/leaderboard/activity` | `period`, `limit` | Top members by activity events |
 | `/api/leaderboard/payout` | `period`, `limit` | Top members by payout value |
-| `/api/settings` | — | Current server settings (e.g. `clanName`) |
+| `/api/settings` | — | Current server settings (e.g. `orgName`) |
 
 ### Settings (`PATCH /api/settings`)
 
 ```json
-{ "clanName": "My Clan" }
+{ "clanName": "My Org" }
 ```
 
 ### Member status (`PATCH /api/members/:id/status`)
@@ -138,7 +174,7 @@ Valid values: `approved`, `rejected`, `pending`.
 
 - `AUTH_TOKEN` is generated using `crypto.randomBytes(32)` — 256 bits of entropy.
 - All API routes except `GET /api/health` require the token as a Bearer header.
-- The token never reaches the browser — the desktop app proxies clan API calls through its local Express backend, injecting the token server-side.
+- The token never reaches the browser — the desktop app proxies org API calls through its local Express backend, injecting the token server-side.
 - For production deployments, put the server behind a reverse proxy (nginx, Caddy) to terminate TLS.
 - Never commit `.env` or the `data/` directory — both are in `.gitignore`.
 
@@ -150,7 +186,7 @@ Two `node-cron` jobs run automatically in the background:
 
 | Job | Schedule | What it does |
 |---|---|---|
-| `aggregateStats` | Every 15 min | Processes unprocessed sessions and updates clan stats |
+| `aggregateStats` | Every 15 min | Processes unprocessed sessions and updates org stats |
 | `cleanupOldData` | Daily at 02:00 | Deletes sessions and activity log entries older than `DATA_RETENTION_DAYS` |
 
 ---
@@ -165,5 +201,5 @@ Two `node-cron` jobs run automatically in the background:
 | Database | SQLite via `@libsql/client` |
 | Validation | Zod |
 | Jobs | node-cron |
-| Packaging | `@yao-pkg/pkg` (Windows x64 exe) |
+| Packaging | Docker (Linux/VPS) · `@yao-pkg/pkg` (Windows exe) |
 | Dashboard | Vanilla HTML + CSS + JS (no build step) |

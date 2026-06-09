@@ -1,0 +1,10 @@
+services:
+  quantum-org-server:
+    image: ghcr.io/ghostncoffee/quantum-org-server:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped

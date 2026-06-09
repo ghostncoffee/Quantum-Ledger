@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   # ── Desktop app (Electron, Windows) ────────────────────────────────────────
@@ -58,13 +59,13 @@ jobs:
           path: quantum-ledger/release/**/*.exe
           if-no-files-found: error
 
-  # ── Clan data server (pkg → single .exe) ───────────────────────────────────
-  build-clan-server:
-    name: Clan data server (Windows)
+  # ── Org server — Windows .exe (pkg) ────────────────────────────────────────
+  build-org-server-exe:
+    name: Org server (Windows exe)
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: clan-data-server
+        working-directory: quantum-org-server
     steps:
       - uses: actions/checkout@v4
 
@@ -80,14 +81,33 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: clan-data-server
-          path: clan-data-server/pkg-dist/clan-data-server.exe
+          name: quantum-org-server-exe
+          path: quantum-org-server/pkg-dist/quantum-org-server.exe
           if-no-files-found: error
 
-  # ── Publish both to a rolling "latest" pre-release ─────────────────────────
+  # ── Org server — Docker image (ghcr.io) ────────────────────────────────────
+  build-org-server-docker:
+    name: Org server (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: quantum-org-server
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/quantum-org-server:latest
+
+  # ── Publish .exe files to a rolling "latest" pre-release ───────────────────
   publish:
     name: Publish latest release
-    needs: [build-desktop, build-clan-server]
+    needs: [build-desktop, build-org-server-exe]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,5 +135,7 @@ jobs:
             |---|---|
             | `Quantum Ledger-*-Setup-x64.exe` | Desktop app — Windows installer |
             | `Quantum Ledger-*-Portable-x64.exe` | Desktop app — portable, no install needed |
-            | `clan-data-server.exe` | Clan data server — self-contained, run beside `.env` |
+            | `quantum-org-server.exe` | Org server — Windows, self-contained |
+
+            **Linux / VPS:** use the Docker image instead — `ghcr.io/ghostncoffee/quantum-org-server:latest`
           files: dist/**/*
